@@ -159,6 +159,22 @@ Run both test sets on four GPUs:
 bash datasets_video_text/scripts/run_qwen3vl_eval.sh
 ```
 
+By default the launcher sources:
+
+```bash
+/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/cache_env_new.sh
+```
+
+Override or disable this with:
+
+```bash
+ENV_FILE=/path/to/your_env.sh bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+ENV_FILE= bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
+The launcher traps `Ctrl+C`/`SIGTERM` and stops all worker processes it started.
+For an already running old launcher, stop worker PIDs manually with `kill -TERM`.
+
 Useful overrides:
 
 ```bash

@@ -64,13 +64,25 @@ for archive in "${archives[@]}"; do
   echo "[IEMOCAP] Extracting $(basename "${archive}")"
   case "${archive}" in
     *.zip)
-      unzip -q -o "${archive}" -d "${RAW_DIR}"
+      unzip -q -o "${archive}" -d "${RAW_DIR}" \
+        -x '*/wav/*' '*/WAV/*' '*.wav' '*.WAV' '*.mp3' '*.MP3' \
+           '*.flac' '*.FLAC' '*.aac' '*.AAC'
       ;;
     *.tar)
-      tar -xf "${archive}" -C "${RAW_DIR}"
+      tar -xf "${archive}" -C "${RAW_DIR}" \
+        --exclude='*/wav/*' --exclude='*/WAV/*' \
+        --exclude='*.wav' --exclude='*.WAV' \
+        --exclude='*.mp3' --exclude='*.MP3' \
+        --exclude='*.flac' --exclude='*.FLAC' \
+        --exclude='*.aac' --exclude='*.AAC'
       ;;
     *.tar.gz|*.tgz)
-      tar -xzf "${archive}" -C "${RAW_DIR}"
+      tar -xzf "${archive}" -C "${RAW_DIR}" \
+        --exclude='*/wav/*' --exclude='*/WAV/*' \
+        --exclude='*.wav' --exclude='*.WAV' \
+        --exclude='*.mp3' --exclude='*.MP3' \
+        --exclude='*.flac' --exclude='*.FLAC' \
+        --exclude='*.aac' --exclude='*.AAC'
       ;;
     *)
       echo "Unsupported archive: ${archive}" >&2
@@ -89,4 +101,3 @@ python3 "${SCRIPT_DIR}/prepare_iemocap.py" \
   --output-dir "${PROCESSED_DIR}"
 
 echo "[IEMOCAP] Done. Processed files are in ${PROCESSED_DIR}"
-

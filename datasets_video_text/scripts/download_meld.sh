@@ -33,6 +33,64 @@ download_file() {
   fi
 }
 
+extract_archive_once() {
+  local archive="$1"
+  local dest="$2"
+  local marker="${dest}/.$(basename "${archive}").extracted"
+  if [[ -f "${marker}" ]]; then
+    return 0
+  fi
+
+  echo "[MELD] Extracting nested archive ${archive}"
+  case "${archive}" in
+    *.tar.gz|*.tgz)
+      tar -xzf "${archive}" -C "${dest}"
+      ;;
+    *.tar)
+      tar -xf "${archive}" -C "${dest}"
+      ;;
+    *.zip)
+      unzip -q -o "${archive}" -d "${dest}"
+      ;;
+    *)
+      echo "[MELD] Unsupported nested archive: ${archive}" >&2
+      return 1
+      ;;
+  esac
+  touch "${marker}"
+}
+
+ensure_annotation_csv() {
+  local name="$1"
+  local target=""
+
+  target="$(find "${RAW_DIR}" -type f -iname "${name}" | head -n 1 || true)"
+  if [[ -n "${target}" ]]; then
+    return 0
+  fi
+
+  local annotation_dir="${RAW_DIR}/MELD.Raw"
+  mkdir -p "${annotation_dir}"
+  target="${annotation_dir}/${name}"
+
+  local url="https://raw.githubusercontent.com/declare-lab/MELD/master/data/MELD/${name}"
+  echo "[MELD] Missing ${name}; downloading official annotation from ${url}"
+  if command -v wget >/dev/null 2>&1; then
+    wget -c -O "${target}" "${url}"
+  elif command -v curl >/dev/null 2>&1; then
+    curl -L --retry 5 -o "${target}" "${url}"
+  else
+    cat >&2 <<EOF
+[MELD] Missing ${name}, and neither wget nor curl is available.
+[MELD] Please download it manually from:
+       ${url}
+[MELD] Then place it below:
+       ${annotation_dir}
+EOF
+    exit 1
+  fi
+}
+
 if [[ ! -s "${ARCHIVE}" ]]; then
   ok=0
   for url in "${MELD_URLS[@]}"; do
@@ -53,6 +111,16 @@ if [[ ! -d "${RAW_DIR}/MELD.Raw" ]]; then
   tar -xzf "${ARCHIVE}" -C "${RAW_DIR}"
 fi
 
+echo "[MELD] Extracting inner split archives if present"
+while IFS= read -r nested_archive; do
+  extract_archive_once "${nested_archive}" "$(dirname "${nested_archive}")"
+done < <(find "${RAW_DIR}" -type f \( -iname '*.tar.gz' -o -iname '*.tgz' -o -iname '*.tar' -o -iname '*.zip' \))
+
+echo "[MELD] Ensuring official annotation CSV files exist"
+ensure_annotation_csv "train_sent_emo.csv"
+ensure_annotation_csv "dev_sent_emo.csv"
+ensure_annotation_csv "test_sent_emo.csv"
+
 echo "[MELD] Removing audio-only files if present"
 find "${RAW_DIR}" -type f \( -iname '*.wav' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.aac' \) -delete
 
@@ -62,4 +130,3 @@ python3 "${SCRIPT_DIR}/prepare_meld.py" \
   --output-dir "${PROCESSED_DIR}"
 
 echo "[MELD] Done. Processed files are in ${PROCESSED_DIR}"
-

@@ -70,7 +70,12 @@ bash datasets_video_text/scripts/download_meld.sh
 ```
 
 The script downloads `MELD.Raw.tar.gz`, extracts it, removes audio-only files,
-and creates the processed JSONL files.
+and creates the processed JSONL files. The official raw archive contains inner
+split archives such as `train.tar.gz`, `dev.tar.gz`, and `test.tar.gz`; the
+script extracts these automatically. If any of `train_sent_emo.csv`,
+`dev_sent_emo.csv`, or `test_sent_emo.csv` is missing from the raw archive, the
+script downloads the missing annotation CSV from the official
+`declare-lab/MELD` GitHub repository.
 
 Official source checked when this folder was created:
 https://affective-meld.github.io/
@@ -111,4 +116,3 @@ speaker/session-independent evaluation split:
 
 Override this in `prepare_iemocap.py` if your experiment protocol requires
 5-fold leave-one-session-out cross validation.
-

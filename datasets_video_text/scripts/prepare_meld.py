@@ -24,7 +24,12 @@ def find_file(root: Path, names):
     for path in root.rglob("*"):
         if path.is_file() and path.name.lower() in wanted:
             return path
-    raise FileNotFoundError(f"Could not find any of {names} below {root}")
+    found = sorted(str(path) for path in root.rglob("*.csv"))
+    found_text = "\n".join(found[:30]) if found else "(no csv files found)"
+    raise FileNotFoundError(
+        f"Could not find any of {names} below {root}.\n"
+        f"CSV files currently visible below raw-dir:\n{found_text}"
+    )
 
 
 def load_video_index(root: Path):
@@ -159,4 +164,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -4,13 +4,16 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design}"
 MODEL_PATH="${MODEL_PATH:-/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/hfmodel/qwen3vl_8b}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/datasets_video_text/results/qwen3vl_8b}"
 ENV_FILE="${ENV_FILE:-/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/cache_env_new.sh}"
 DATASET="${DATASET:-all}"
 SPLIT="${SPLIT:-test}"
 GPUS="${GPUS:-0,1,2,3}"
 FPS="${FPS:-2}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-16}"
+MODALITY="${MODALITY:-video_text}"
+PROMPT_VERSION="${PROMPT_VERSION:-original}"
+RUN_NAME="${RUN_NAME:-${MODALITY}_${PROMPT_VERSION}}"
+OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/datasets_video_text/results/qwen3vl_8b/${RUN_NAME}}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
 RESUME="${RESUME:-1}"
 LOG_DIR="${OUTPUT_DIR}/logs"
@@ -55,6 +58,8 @@ common_args=(
   --output-dir "${OUTPUT_DIR}"
   --fps "${FPS}"
   --max-new-tokens "${MAX_NEW_TOKENS}"
+  --modality "${MODALITY}"
+  --prompt-version "${PROMPT_VERSION}"
 )
 
 if [[ "${FLASH_ATTN}" == "1" ]]; then
@@ -66,7 +71,7 @@ fi
 
 run_dataset() {
   local dataset="$1"
-  echo "[Qwen3VL] Running ${dataset}/${SPLIT} on GPUs ${GPUS} with fps=${FPS}"
+  echo "[Qwen3VL] Running ${dataset}/${SPLIT} modality=${MODALITY} prompt=${PROMPT_VERSION} on GPUs ${GPUS} with fps=${FPS}"
   local pids=()
   ACTIVE_PIDS=()
   for rank in "${!GPU_ARRAY[@]}"; do

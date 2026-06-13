@@ -19,15 +19,21 @@ DEFAULT_MODEL_PATH = Path(
 
 ALIASES = {
     "anger": ["anger", "angry", "ang"],
+    "angry": ["angry", "anger", "ang"],
     "disgust": ["disgust", "disgusted", "dis"],
     "fear": ["fear", "fearful", "scared", "fea"],
     "frustration": ["frustration", "frustrated", "fru"],
+    "frustrated": ["frustrated", "frustration", "fru"],
     "happiness": ["happiness", "happy", "hap"],
+    "happy": ["happy", "happiness", "joy"],
     "joy": ["joy", "happy", "happiness"],
+    "joyful": ["joyful", "joy", "happy", "happiness"],
     "neutral": ["neutral", "neu"],
     "sadness": ["sadness", "sad", "sadness.", "sadness,", "sad"],
+    "sad": ["sad", "sadness"],
     "surprise": ["surprise", "surprised", "sur"],
     "excitement": ["excitement", "excited", "exc"],
+    "excited": ["excited", "excitement", "exc"],
     "other": ["other", "others", "oth"],
 }
 
@@ -51,13 +57,15 @@ def append_jsonl(path, record):
         f.flush()
 
 
-def load_labels(label_file, rows):
+def load_labels(label_file, rows, label_text=None, gold_field="emotion"):
+    if label_text:
+        return [label.strip().lower() for label in label_text.split(",") if label.strip()]
     if label_file and Path(label_file).exists():
         data = json.loads(Path(label_file).read_text(encoding="utf-8"))
         labels = data.get("emotion") or data.get("labels")
         if labels:
             return [str(label).lower() for label in labels]
-    return sorted({str(row["emotion"]).lower() for row in rows if row.get("emotion")})
+    return sorted({str(row[gold_field]).lower() for row in rows if row.get(gold_field)})
 
 
 def strict_prompt(base_prompt, labels):
@@ -181,15 +189,16 @@ def load_model_and_processor(args):
     return model, processor
 
 
-def build_messages(row, labels, fps, prompt_field):
+def build_messages(row, labels, fps, prompt_field, modality):
     prompt = strict_prompt(row.get(prompt_field) or row.get("qwen_prompt") or row.get("text"), labels)
+    content = []
+    if modality == "video_text":
+        content.append({"type": "video", "video": row["video_path"], "fps": fps})
+    content.append({"type": "text", "text": prompt})
     return [
         {
             "role": "user",
-            "content": [
-                {"type": "video", "video": row["video_path"], "fps": fps},
-                {"type": "text", "text": prompt},
-            ],
+            "content": content,
         }
     ]
 
@@ -204,7 +213,7 @@ def model_input_device(model):
 def generate_one(model, processor, row, labels, args):
     import torch
 
-    messages = build_messages(row, labels, args.fps, args.prompt_field)
+    messages = build_messages(row, labels, args.fps, args.prompt_field, args.modality)
     inputs = processor.apply_chat_template(
         messages,
         tokenize=True,
@@ -243,7 +252,7 @@ def existing_sample_ids(path):
 
 def run_inference(args):
     rows = list(read_jsonl(Path(args.manifest)))
-    labels = load_labels(args.label_file, rows)
+    labels = load_labels(args.label_file, rows, args.labels, args.gold_field)
     shard_rows = [row for idx, row in enumerate(rows) if idx % args.world_size == args.rank]
     output_path = Path(args.output_dir) / f"{args.dataset}_{args.split}_shard{args.rank}.jsonl"
     done_ids = existing_sample_ids(output_path) if args.resume else set()
@@ -260,6 +269,10 @@ def run_inference(args):
                 "rows_shard": len(shard_rows),
                 "rows_done": len(done_ids),
                 "labels": labels,
+                "modality": args.modality,
+                "prompt_version": args.prompt_version,
+                "prompt_field": args.prompt_field,
+                "gold_field": args.gold_field,
                 "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             },
             ensure_ascii=False,
@@ -275,14 +288,16 @@ def run_inference(args):
             continue
 
         started = time.time()
-        gold = str(row.get("emotion", "")).lower()
+        gold = str(row.get(args.gold_field, "")).lower()
         video_path = row.get("video_path")
-        if not video_path or not Path(video_path).exists():
+        if args.modality == "video_text" and (not video_path or not Path(video_path).exists()):
             append_jsonl(
                 output_path,
                 {
                     "sample_id": sample_id,
                     "status": "skipped_missing_video",
+                    "modality": args.modality,
+                    "prompt_version": args.prompt_version,
                     "gold": gold,
                     "prediction": None,
                     "raw_output": "",
@@ -311,6 +326,10 @@ def run_inference(args):
                 "sample_id": sample_id,
                 "dataset": args.dataset,
                 "split": args.split,
+                "modality": args.modality,
+                "prompt_version": args.prompt_version,
+                "prompt_field": args.prompt_field,
+                "gold_field": args.gold_field,
                 "status": status,
                 "gold": gold,
                 "prediction": prediction,
@@ -347,7 +366,7 @@ def aggregate(args):
         rows.extend(read_jsonl(file))
 
     manifest_rows = list(read_jsonl(Path(args.manifest))) if args.manifest else []
-    labels = load_labels(args.label_file, manifest_rows or rows)
+    labels = load_labels(args.label_file, manifest_rows or rows, args.labels, args.gold_field)
     status_counts = Counter(row.get("status", "unknown") for row in rows)
     eval_rows = [row for row in rows if str(row.get("status", "")).startswith("ok")]
     y_true = [row["gold"] for row in eval_rows]
@@ -360,6 +379,10 @@ def aggregate(args):
     metrics = {
         "dataset": args.dataset,
         "split": args.split,
+        "modality": args.modality,
+        "prompt_version": args.prompt_version,
+        "prompt_field": args.prompt_field,
+        "gold_field": args.gold_field,
         "prediction_files": [str(file) for file in files],
         "num_records": len(rows),
         "num_eval_records": len(eval_rows),
@@ -376,19 +399,23 @@ def aggregate(args):
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
 
 
-def default_manifest(project_root, dataset, split):
+def default_manifest(project_root, dataset, split, prompt_version):
     if dataset == "meld":
-        return project_root / f"datasets_video_text/data/meld/processed/{split}.jsonl"
+        folder = "processed_new_prompt" if prompt_version == "new" else "processed"
+        return project_root / f"datasets_video_text/data/meld/{folder}/{split}.jsonl"
     if dataset == "iemocap":
-        return project_root / f"datasets_video_text/data/iemocap/processed_sentence/{split}.jsonl"
+        folder = "processed_sentence_new_prompt" if prompt_version == "new" else "processed_sentence"
+        return project_root / f"datasets_video_text/data/iemocap/{folder}/{split}.jsonl"
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def default_label_file(project_root, dataset):
+def default_label_file(project_root, dataset, prompt_version):
     if dataset == "meld":
-        return project_root / "datasets_video_text/data/meld/processed/labels.json"
+        folder = "processed_new_prompt" if prompt_version == "new" else "processed"
+        return project_root / f"datasets_video_text/data/meld/{folder}/labels.json"
     if dataset == "iemocap":
-        return project_root / "datasets_video_text/data/iemocap/processed_sentence/labels.json"
+        folder = "processed_sentence_new_prompt" if prompt_version == "new" else "processed_sentence"
+        return project_root / f"datasets_video_text/data/iemocap/{folder}/labels.json"
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -406,7 +433,11 @@ def parse_args():
     parser.add_argument("--world-size", type=int, default=1)
     parser.add_argument("--fps", type=float, default=2.0)
     parser.add_argument("--max-new-tokens", type=int, default=16)
+    parser.add_argument("--modality", choices=["video_text", "text_only"], default="video_text")
+    parser.add_argument("--prompt-version", choices=["original", "new"], default="original")
     parser.add_argument("--prompt-field", default="qwen_prompt")
+    parser.add_argument("--gold-field", default="emotion")
+    parser.add_argument("--labels")
     parser.add_argument("--dtype", choices=["bf16", "auto"], default="bf16")
     parser.add_argument("--flash-attn", action="store_true")
     parser.add_argument("--resume", action="store_true")
@@ -414,10 +445,15 @@ def parse_args():
     args = parser.parse_args()
 
     project_root = Path(args.project_root)
+    if args.prompt_version == "new":
+        if args.prompt_field == "qwen_prompt":
+            args.prompt_field = "qwen_prompt_new"
+        if args.gold_field == "emotion":
+            args.gold_field = "emotion_prompt"
     if args.manifest is None:
-        args.manifest = str(default_manifest(project_root, args.dataset, args.split))
+        args.manifest = str(default_manifest(project_root, args.dataset, args.split, args.prompt_version))
     if args.label_file is None:
-        args.label_file = str(default_label_file(project_root, args.dataset))
+        args.label_file = str(default_label_file(project_root, args.dataset, args.prompt_version))
     if args.output_dir is None:
         args.output_dir = str(project_root / "datasets_video_text/results/qwen3vl_8b")
     return args

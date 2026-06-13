@@ -184,10 +184,61 @@ GPUS=0,1,2,3 FPS=2 FLASH_ATTN=1 bash datasets_video_text/scripts/run_qwen3vl_eva
 FLASH_ATTN=0 bash datasets_video_text/scripts/run_qwen3vl_eval.sh
 ```
 
+Run text-only ablations with the same model and prompts:
+
+```bash
+MODALITY=text_only DATASET=iemocap bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+MODALITY=text_only DATASET=meld bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
+Build manifests using the prompt style in `data/new_prompt`:
+
+```bash
+bash datasets_video_text/scripts/build_new_prompt_manifests.sh
+```
+
+This writes:
+
+```text
+data/meld/processed_new_prompt/
+data/iemocap/processed_sentence_new_prompt/
+```
+
+The new prompt manifests use:
+
+```text
+prompt field: qwen_prompt_new
+gold field: emotion_prompt
+speaker names: Speaker_0, Speaker_1, ...
+```
+
+IEMOCAP's provided new prompt style uses six labels:
+
+```text
+happy, sad, neutral, angry, excited, frustrated
+```
+
+Therefore samples outside that label space, such as `fear` and `surprise`, are
+dropped by default when building `processed_sentence_new_prompt`.
+
+Run with the new prompt style:
+
+```bash
+PROMPT_VERSION=new DATASET=iemocap bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+PROMPT_VERSION=new DATASET=meld bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
+Run text-only with the new prompt style:
+
+```bash
+MODALITY=text_only PROMPT_VERSION=new DATASET=iemocap bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+MODALITY=text_only PROMPT_VERSION=new DATASET=meld bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
 Outputs are written to:
 
 ```text
-datasets_video_text/results/qwen3vl_8b/
+datasets_video_text/results/qwen3vl_8b/{MODALITY}_{PROMPT_VERSION}/
   meld_test_shard0.jsonl
   ...
   meld_test_metrics.json

@@ -25,6 +25,12 @@ datasets_video_text/data/**/*.aac
 !datasets_video_text/data/*/processed_sentence/
 !datasets_video_text/data/*/processed_sentence/*.json
 !datasets_video_text/data/*/processed_sentence/*.jsonl
+!datasets_video_text/data/*/processed_new_prompt/
+!datasets_video_text/data/*/processed_new_prompt/*.json
+!datasets_video_text/data/*/processed_new_prompt/*.jsonl
+!datasets_video_text/data/*/processed_sentence_new_prompt/
+!datasets_video_text/data/*/processed_sentence_new_prompt/*.json
+!datasets_video_text/data/*/processed_sentence_new_prompt/*.jsonl
 !datasets_video_text/data/.gitkeep
 !datasets_video_text/data/*/.gitkeep
 

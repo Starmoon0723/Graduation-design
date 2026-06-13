@@ -129,6 +129,59 @@ you need audio retained:
 bash datasets_video_text/scripts/cut_iemocap_sentence_videos.sh --keep-audio
 ```
 
+## Manifest validation
+
+After syncing generated manifests, run:
+
+```bash
+python3 datasets_video_text/scripts/validate_manifests.py --check-exists
+```
+
+This checks row counts, missing `video_path`, missing prompt/text, major path
+patterns, and optionally whether referenced videos exist on the server.
+
+## Qwen3-VL-8B-Instruct evaluation
+
+The evaluation scripts use the generated `qwen_prompt` text and the video clip
+from `video_path`. Video inputs are passed to the processor with `fps=2` by
+default. The launcher runs one process per GPU, and each process loads one model
+copy and handles one shard of the test set.
+
+Default model path:
+
+```bash
+/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/hfmodel/qwen3vl_8b
+```
+
+Run both test sets on four GPUs:
+
+```bash
+bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
+Useful overrides:
+
+```bash
+DATASET=meld bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+DATASET=iemocap bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+GPUS=0,1,2,3 FPS=2 FLASH_ATTN=1 bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+FLASH_ATTN=0 bash datasets_video_text/scripts/run_qwen3vl_eval.sh
+```
+
+Outputs are written to:
+
+```text
+datasets_video_text/results/qwen3vl_8b/
+  meld_test_shard0.jsonl
+  ...
+  meld_test_metrics.json
+  iemocap_test_metrics.json
+  logs/
+```
+
+Metrics include accuracy and weighted F1 (`weighted_f1`). Prediction JSONL files
+store the raw model output and the parsed label for inspection.
+
 ## Train/dev/test split policy
 
 MELD uses its official train/dev/test split.

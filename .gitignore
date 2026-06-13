@@ -27,3 +27,10 @@ datasets_video_text/data/**/*.aac
 !datasets_video_text/data/*/processed_sentence/*.jsonl
 !datasets_video_text/data/.gitkeep
 !datasets_video_text/data/*/.gitkeep
+
+# Evaluation outputs: keep compact metrics, ignore bulky predictions/logs.
+datasets_video_text/results/*
+!datasets_video_text/results/**/
+!datasets_video_text/results/**/*.json
+datasets_video_text/results/**/*.jsonl
+datasets_video_text/results/**/*.log

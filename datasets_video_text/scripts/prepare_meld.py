@@ -32,11 +32,20 @@ def find_file(root: Path, names):
     )
 
 
-def load_video_index(root: Path):
+def load_video_index(root: Path, split: str):
     index = {}
+    hint_names = VIDEO_DIR_HINTS.get(split, [])
+    candidate_roots = []
+    for path in root.rglob("*"):
+        if path.is_dir() and path.name in hint_names:
+            candidate_roots.append(path)
+    if not candidate_roots:
+        candidate_roots = [root]
+
     for ext in ("*.mp4", "*.avi", "*.mov", "*.mkv"):
-        for path in root.rglob(ext):
-            index[path.name.lower()] = path.resolve()
+        for candidate_root in candidate_roots:
+            for path in candidate_root.rglob(ext):
+                index[path.name.lower()] = path.resolve()
     return index
 
 
@@ -86,7 +95,6 @@ def main():
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    video_index = load_video_index(raw_dir)
     all_rows = {}
     labels = set()
 
@@ -101,6 +109,7 @@ def main():
     summary = {"dataset": "meld", "splits": {}, "missing_videos": {}}
 
     for split, rows in all_rows.items():
+        video_index = load_video_index(raw_dir, split)
         by_dialogue = defaultdict(list)
         for row in rows:
             by_dialogue[row["Dialogue_ID"]].append(row)

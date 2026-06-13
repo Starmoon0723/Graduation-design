@@ -1,0 +1,29 @@
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Dataset archives and raw extraction outputs
+datasets_video_text/data/*/archives/
+datasets_video_text/data/*/raw/
+
+# Generated media files
+datasets_video_text/data/*/sentence_videos/
+datasets_video_text/data/**/*.mp4
+datasets_video_text/data/**/*.avi
+datasets_video_text/data/**/*.mov
+datasets_video_text/data/**/*.mkv
+datasets_video_text/data/**/*.wav
+datasets_video_text/data/**/*.mp3
+datasets_video_text/data/**/*.flac
+datasets_video_text/data/**/*.aac
+
+# Keep processed JSON/JSONL manifests trackable.
+!datasets_video_text/data/*/processed/
+!datasets_video_text/data/*/processed/*.json
+!datasets_video_text/data/*/processed/*.jsonl
+!datasets_video_text/data/*/processed_sentence/
+!datasets_video_text/data/*/processed_sentence/*.json
+!datasets_video_text/data/*/processed_sentence/*.jsonl
+!datasets_video_text/data/.gitkeep
+!datasets_video_text/data/*/.gitkeep

@@ -103,6 +103,32 @@ and creates JSONL manifests. It also supports `IEMOCAP_URLS_FILE` for private,
 authorized URLs, but no public mirror is embedded because the dataset is
 license-restricted.
 
+The initial IEMOCAP manifest may point to dialogue-level videos such as
+`Ses01F_impro01.avi`. For utterance-level VLM evaluation, cut those videos into
+sentence clips after `download_iemocap.sh` finishes:
+
+```bash
+bash datasets_video_text/scripts/cut_iemocap_sentence_videos.sh
+```
+
+This uses `ffmpeg` and writes:
+
+```text
+data/iemocap/sentence_videos/
+data/iemocap/processed_sentence/train.jsonl
+data/iemocap/processed_sentence/dev.jsonl
+data/iemocap/processed_sentence/test.jsonl
+```
+
+The updated JSONL files set `video_path` to the sentence-level `.mp4` clip and
+preserve the original dialogue video as `source_video_path`. Audio is stripped
+by default because the target evaluation is video + text. Add `--keep-audio` if
+you need audio retained:
+
+```bash
+bash datasets_video_text/scripts/cut_iemocap_sentence_videos.sh --keep-audio
+```
+
 ## Train/dev/test split policy
 
 MELD uses its official train/dev/test split.

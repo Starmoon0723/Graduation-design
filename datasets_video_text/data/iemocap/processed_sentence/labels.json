@@ -1,0 +1,14 @@
+{
+  "emotion": [
+    "anger",
+    "disgust",
+    "excitement",
+    "fear",
+    "frustration",
+    "happiness",
+    "neutral",
+    "other",
+    "sadness",
+    "surprise"
+  ]
+}

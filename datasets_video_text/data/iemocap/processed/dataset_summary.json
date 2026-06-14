@@ -1,0 +1,52 @@
+{
+  "dataset": "iemocap",
+  "splits": {
+    "train": {
+      "samples": 4343,
+      "emotion_counts": {
+        "anger": 606,
+        "disgust": 2,
+        "excitement": 504,
+        "fear": 23,
+        "frustration": 987,
+        "happiness": 387,
+        "neutral": 1066,
+        "other": 2,
+        "sadness": 696,
+        "surprise": 70
+      }
+    },
+    "dev": {
+      "samples": 1539,
+      "emotion_counts": {
+        "anger": 327,
+        "excitement": 238,
+        "fear": 7,
+        "frustration": 481,
+        "happiness": 65,
+        "neutral": 258,
+        "other": 1,
+        "sadness": 143,
+        "surprise": 19
+      }
+    },
+    "test": {
+      "samples": 1650,
+      "emotion_counts": {
+        "anger": 170,
+        "excitement": 299,
+        "fear": 10,
+        "frustration": 381,
+        "happiness": 143,
+        "neutral": 384,
+        "sadness": 245,
+        "surprise": 18
+      }
+    }
+  },
+  "missing_videos": {
+    "train": 0,
+    "dev": 0,
+    "test": 0
+  }
+}

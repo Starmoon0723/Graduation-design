@@ -1,0 +1,367 @@
+{
+  "dataset": "iemocap",
+  "prompt_style_source": "datasets_video_text/data/new_prompt",
+  "gold_field": "emotion_prompt",
+  "prompt_field": "qwen_prompt_new",
+  "labels": [
+    "happy",
+    "sad",
+    "neutral",
+    "angry",
+    "excited",
+    "frustrated"
+  ],
+  "splits": {
+    "train": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence/train.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence_new_prompt/train.jsonl",
+      "rows_in": 4343,
+      "rows_out": 4246,
+      "dropped": 97,
+      "emotion_counts": {
+        "angry": 606,
+        "excited": 504,
+        "frustrated": 987,
+        "happy": 387,
+        "neutral": 1066,
+        "sad": 696
+      },
+      "skipped_examples": [
+        {
+          "sample_id": "iemocap_Ses01F_impro03_M002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_impro03_M017",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_impro03_M018",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_impro05_M032",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_impro05_M033",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script01_1_F002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script01_3_M014",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_1_F003",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_1_M030",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_2_M027",
+          "emotion": "other",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_2_F037",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_2_M039",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script02_2_F038",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_M000",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_F000",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_M001",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_F001",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_M002",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_F002",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses01F_script03_1_M003",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        }
+      ]
+    },
+    "dev": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence/dev.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence_new_prompt/dev.jsonl",
+      "rows_in": 1539,
+      "rows_out": 1512,
+      "dropped": 27,
+      "emotion_counts": {
+        "angry": 327,
+        "excited": 238,
+        "frustrated": 481,
+        "happy": 65,
+        "neutral": 258,
+        "sad": 143
+      },
+      "skipped_examples": [
+        {
+          "sample_id": "iemocap_Ses04F_impro03_M002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_impro05_F007",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_impro07_M002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_impro07_M003",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script01_1_F001",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script01_1_F009",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script02_1_M006",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script02_1_M028",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script02_2_M042",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script03_1_M001",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04F_script03_1_M002",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro04_F010",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro04_M023",
+          "emotion": "other",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro07_F000",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro07_F001",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro08_F019",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro08_F021",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_impro08_F025",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_script01_1_F002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses04M_script01_1_F008",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        }
+      ]
+    },
+    "test": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence/test.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence_new_prompt/test.jsonl",
+      "rows_in": 1650,
+      "rows_out": 1622,
+      "dropped": 28,
+      "emotion_counts": {
+        "angry": 170,
+        "excited": 299,
+        "frustrated": 381,
+        "happy": 143,
+        "neutral": 384,
+        "sad": 245
+      },
+      "skipped_examples": [
+        {
+          "sample_id": "iemocap_Ses05F_impro02_F006",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_impro02_M019",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_impro02_M039",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_impro03_M002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_impro08_M024",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_script01_3_M002",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_script02_1_M025",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05F_script03_1_M006",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F001",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F002",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F003",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F008",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F015",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F016",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F017",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro02_F019",
+          "emotion": "fear",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro03_F001",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro05_M008",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_impro08_F021",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        },
+        {
+          "sample_id": "iemocap_Ses05M_script01_1_F031",
+          "emotion": "surprise",
+          "reason": "unsupported_by_new_prompt_label_space"
+        }
+      ]
+    }
+  }
+}

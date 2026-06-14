@@ -1,0 +1,46 @@
+{
+  "dataset": "meld",
+  "splits": {
+    "train": {
+      "samples": 9989,
+      "emotion_counts": {
+        "anger": 1109,
+        "disgust": 271,
+        "fear": 268,
+        "joy": 1743,
+        "neutral": 4710,
+        "sadness": 683,
+        "surprise": 1205
+      }
+    },
+    "dev": {
+      "samples": 1109,
+      "emotion_counts": {
+        "anger": 153,
+        "disgust": 22,
+        "fear": 40,
+        "joy": 163,
+        "neutral": 470,
+        "sadness": 111,
+        "surprise": 150
+      }
+    },
+    "test": {
+      "samples": 2610,
+      "emotion_counts": {
+        "anger": 345,
+        "disgust": 68,
+        "fear": 50,
+        "joy": 402,
+        "neutral": 1256,
+        "sadness": 208,
+        "surprise": 281
+      }
+    }
+  },
+  "missing_videos": {
+    "train": 0,
+    "dev": 1,
+    "test": 0
+  }
+}

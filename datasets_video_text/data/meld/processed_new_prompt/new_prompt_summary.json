@@ -1,0 +1,68 @@
+{
+  "dataset": "meld",
+  "prompt_style_source": "datasets_video_text/data/new_prompt",
+  "gold_field": "emotion_prompt",
+  "prompt_field": "qwen_prompt_new",
+  "labels": [
+    "neutral",
+    "surprise",
+    "fear",
+    "sad",
+    "joyful",
+    "disgust",
+    "angry"
+  ],
+  "splits": {
+    "train": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed/train.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed_new_prompt/train.jsonl",
+      "rows_in": 9989,
+      "rows_out": 9989,
+      "dropped": 0,
+      "emotion_counts": {
+        "angry": 1109,
+        "disgust": 271,
+        "fear": 268,
+        "joyful": 1743,
+        "neutral": 4710,
+        "sad": 683,
+        "surprise": 1205
+      },
+      "skipped_examples": []
+    },
+    "dev": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed/dev.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed_new_prompt/dev.jsonl",
+      "rows_in": 1109,
+      "rows_out": 1109,
+      "dropped": 0,
+      "emotion_counts": {
+        "angry": 153,
+        "disgust": 22,
+        "fear": 40,
+        "joyful": 163,
+        "neutral": 470,
+        "sad": 111,
+        "surprise": 150
+      },
+      "skipped_examples": []
+    },
+    "test": {
+      "input": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed/test.jsonl",
+      "output": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/meld/processed_new_prompt/test.jsonl",
+      "rows_in": 2610,
+      "rows_out": 2610,
+      "dropped": 0,
+      "emotion_counts": {
+        "angry": 345,
+        "disgust": 68,
+        "fear": 50,
+        "joyful": 402,
+        "neutral": 1256,
+        "sad": 208,
+        "surprise": 281
+      },
+      "skipped_examples": []
+    }
+  }
+}

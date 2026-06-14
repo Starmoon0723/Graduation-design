@@ -1,0 +1,15 @@
+{
+  "input_dir": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed",
+  "output_dir": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/processed_sentence",
+  "video_root": "/XYFS01/HDD_POOL/hitsz_mszhang/hitsz_mszhang_1/MRC/MRC/MRC_project/others/AAA/vlm/Graduation-design/datasets_video_text/data/iemocap/sentence_videos",
+  "keep_audio": false,
+  "dry_run": false,
+  "status_counts": {
+    "created": 7532
+  },
+  "manifest_rows": {
+    "train": 4343,
+    "dev": 1539,
+    "test": 1650
+  }
+}

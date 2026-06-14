@@ -76,8 +76,9 @@ steps=()
 case "${STEP}" in
   visual) steps=(visual) ;;
   dialogue) steps=(dialogue) ;;
+  predict) steps=(predict) ;;
   both) steps=(visual dialogue) ;;
-  *) echo "STEP must be visual, dialogue, or both" >&2; exit 1 ;;
+  *) echo "STEP must be visual, dialogue, predict, or both" >&2; exit 1 ;;
 esac
 
 datasets=()

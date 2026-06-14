@@ -48,8 +48,10 @@ for two A800 80GB cards per instance.
 
 ## 1. Visual Reasoning Data
 
-This step sends video + text to Qwen3.6-27B. The teacher output includes
-`speaker_visible` and `visual_confidence` directly inside `VISUAL_REASON`.
+This step sends the current utterance video plus a small target-speaker locator
+prompt to Qwen3.6-27B. The text is only for locating the speaker/utterance; the
+teacher must not use dialogue text as emotional evidence and must not predict a
+final label. The output field is only `VISUAL_REASON`.
 
 ```bash
 STEP=visual DATASET=iemocap SPLIT=train \
@@ -64,8 +66,10 @@ datasets_video_text/cot_dataset_builder/results/qwen36_27b/step1_visual_reason/
 
 ## 2. Dialogue-Only Reasoning Data
 
-This step sends only the dialogue prompt. It is useful for text-only SFT/RL data
-and for comparing whether video adds reliable signal.
+This step sends only dialogue text. The manifest gold label is provided to the
+teacher so it can write label-grounded textual evidence, but the output should
+not say that the gold label was provided and must not mention visual/audio cues.
+The output field is only `DIALOGUE_REASON`.
 
 ```bash
 STEP=dialogue DATASET=iemocap SPLIT=train \
@@ -81,27 +85,54 @@ bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
 
 Use `LIMIT=100` for a quick smoke run.
 
-## 3. Build SFT and RL Files
+Optional teacher classification diagnostics can be run separately:
+
+```bash
+STEP=predict DATASET=iemocap SPLIT=train \
+bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
+```
+
+The diagnostic output is not used as the sole SFT filter.
+
+## 3. Build SFT, RL, and Preference Files
 
 After teacher generation finishes:
 
 ```bash
-STEP=both DATASET=all SPLIT=train \
+DATASET=all SPLIT=train \
 bash datasets_video_text/cot_dataset_builder/scripts/run_build_sft_rl.sh
 ```
 
 Output:
 
 ```text
-datasets_video_text/cot_dataset_builder/results/qwen36_27b/step3_sft_rl/{dataset}/{split}/
-  visual_sft.jsonl
-  visual_rl_rewards.jsonl
-  visual_preferences.jsonl
-  dialogue_sft.jsonl
-  dialogue_rl_rewards.jsonl
-  dialogue_preferences.jsonl
+datasets_video_text/cot_dataset_builder/results/qwen36_27b/final_sft/{dataset}/{split}.jsonl
+datasets_video_text/cot_dataset_builder/results/qwen36_27b/final_rl/{dataset}/{split}.jsonl
+datasets_video_text/cot_dataset_builder/results/qwen36_27b/final_preferences/{dataset}/{split}.jsonl
 ```
 
-By default SFT keeps only teacher rows whose parsed final label matches the
-manifest label. RL reward files keep all parsed teacher rows and assign reward
-`1.0` for exact label match, otherwise `0.0`.
+Step 3 reads both `VISUAL_REASON` and `DIALOGUE_REASON`, applies basic quality
+checks, and constructs the final student sample with the manifest gold label:
+
+```text
+<think>
+Visual evidence: ...
+
+Dialogue evidence: ...
+
+Integrated evidence sentence using the manifest gold label.
+</think>
+<answer>
+gold
+</answer>
+```
+
+SFT no longer depends on teacher prediction correctness. RL files are GRPO-ready
+prompts with reference reasons and no precomputed 0/1 reward. Preference data is
+not auto-created from wrong teacher predictions. To create weak answer-only
+preferences, run:
+
+```bash
+BUILD_WEAK_PREFERENCES=1 DATASET=all SPLIT=train \
+bash datasets_video_text/cot_dataset_builder/scripts/run_build_sft_rl.sh
+```

@@ -60,4 +60,7 @@ output:
   logs: datasets_video_text/cot_dataset_builder/logs/qwen36_27b
   step1_visual_reason: step1_visual_reason
   step2_dialogue_reason: step2_dialogue_reason
-  step3_sft_rl: step3_sft_rl
+  diagnostic_predict: diagnostic_predict
+  final_sft: final_sft
+  final_rl: final_rl
+  final_preferences: final_preferences

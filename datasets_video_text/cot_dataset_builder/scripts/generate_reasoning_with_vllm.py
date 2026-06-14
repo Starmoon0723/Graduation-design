@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
 from config_utils import load_config, resolve_project_path
@@ -55,19 +56,48 @@ def append_jsonl(path, record):
 
 def load_labels(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [str(label).lower() for label in (data.get("emotion") or data.get("labels"))]
+    return [normalize_label(label) for label in (data.get("emotion") or data.get("labels"))]
+
+
+def normalize_label(label):
+    return re.sub(r"\s+", " ", str(label or "").strip().lower())
 
 
 def normalize_text(text):
     return re.sub(r"\s+", " ", str(text or "").strip().lower())
 
 
+def clean_text(text):
+    return str(text or "").replace("\r", " ").replace("\n", " ").strip()
+
+
+def speaker_name(row):
+    return clean_text(row.get("speaker") or row.get("speaker_original") or "Speaker")
+
+
+def map_context_speaker(row, speaker):
+    speaker_map = row.get("speaker_map") or {}
+    return speaker_map.get(str(speaker), str(speaker))
+
+
+def conversation_text(row):
+    context = row.get("context") or []
+    lines = []
+    for turn in context:
+        speaker = map_context_speaker(row, turn.get("speaker", "Speaker"))
+        text = clean_text(turn.get("text", ""))
+        if text:
+            lines.append(f"{speaker}: {text}")
+    return "\n".join(lines) if lines else "(none)"
+
+
 def extract_label(output_text, labels):
-    labels = [label.lower() for label in labels]
+    labels = [normalize_label(label) for label in labels]
     text = normalize_text(output_text)
     match = re.search(r"final_answer\s*:\s*([a-zA-Z_ -]+)", text)
     candidates = [match.group(1).strip() if match else "", text.strip(" .,:;\"'`[](){}")]
     for candidate in candidates:
+        candidate = normalize_label(candidate)
         if candidate in labels:
             return candidate
     for label in labels:
@@ -78,60 +108,122 @@ def extract_label(output_text, labels):
     return None
 
 
-def clean_text(text):
-    return str(text or "").replace("\r", " ").replace("\n", " ").strip()
+def extract_reason(output_text, field_name):
+    text = (output_text or "").strip()
+    if not text:
+        return "", "empty"
+    text = re.sub(r"^```(?:text)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    pattern = rf"{re.escape(field_name)}\s*:\s*(.*)"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return text, "ok_unparsed"
+    reason = match.group(1).strip()
+    for marker in (
+        "OBSERVATION",
+        "CONTEXT_REASON",
+        "VISUAL_REASON",
+        "DIALOGUE_REASON",
+        "FINAL_REASON",
+        "FINAL_ANSWER",
+    ):
+        if marker.lower() == field_name.lower():
+            continue
+        marker_match = re.search(rf"\n\s*{marker}\s*:", reason, flags=re.IGNORECASE)
+        if marker_match:
+            reason = reason[: marker_match.start()].strip()
+            break
+    return reason, "ok" if reason else "empty"
 
 
-def dialogue_lines(row, prompt_field):
-    if row.get(prompt_field):
-        return row[prompt_field]
-    context = row.get("context") or []
-    parts = []
-    for turn in context:
-        parts.append(f'{turn.get("speaker", "Speaker")}: {clean_text(turn.get("text", ""))}')
-    parts.append(f'Target speaker: {row.get("speaker", "")}')
-    parts.append(f'Target utterance: {clean_text(row.get("text", ""))}')
-    return "\n".join(parts)
-
-
-def build_prompt(row, labels, prompt_field, step):
-    label_text = ", ".join(labels)
-    target = f'{row.get("speaker", "")}: "{clean_text(row.get("text", ""))}"'
-    base_prompt = dialogue_lines(row, prompt_field)
-    if step == "visual":
-        evidence_scope = (
-            "Use both the sampled video frames and the dialogue text. "
-            "If the target speaker is not visually identifiable, say so explicitly."
-        )
-        visual_rule = (
-            "VISUAL_REASON must include speaker_visible=<yes|no|uncertain> and "
-            "visual_confidence=<high|medium|low>, then explain the visible facial "
-            "expression, body pose, gaze, movement, scene context, or absence of usable cues."
-        )
-    else:
-        evidence_scope = "Use only the dialogue text. Do not invent visual evidence."
-        visual_rule = (
-            "DIALOGUE_REASON should mention text-only confidence=<high|medium|low> "
-            "and explain lexical, pragmatic, and conversational-context evidence."
-        )
-
+def visual_prompt(row):
     return (
-        "You are building high-quality reasoning data for multimodal emotion recognition.\n"
-        f"{evidence_scope}\n"
-        "The reference prompt style below is the zero-shot prompt that performed best in prior experiments.\n\n"
-        f"[Reference zero-shot prompt]\n{base_prompt}\n\n"
-        f"[Target utterance]\n{target}\n\n"
-        f"[Candidate labels]\n{label_text}\n\n"
-        "Write a compact but faithful teacher answer for SFT/RL data construction.\n"
-        "Do not reveal hidden annotations or dataset metadata. Do not say that a gold label is given.\n"
-        f"{visual_rule}\n"
-        "Your output must use exactly this plain-text schema:\n"
-        "OBSERVATION: one or two sentences describing the directly available evidence.\n"
-        "CONTEXT_REASON: one or two sentences explaining how the dialogue context affects the target utterance.\n"
-        f"{'VISUAL_REASON' if step == 'visual' else 'DIALOGUE_REASON'}: one or two sentences with the required confidence marker.\n"
-        "FINAL_REASON: one sentence connecting the evidence to the selected emotion.\n"
-        "FINAL_ANSWER: exactly one lowercase label from the candidate labels."
+        "You are constructing visual evidence for multimodal emotion recognition in conversation.\n\n"
+        "You are given sampled video frames from the current utterance video clip. "
+        "The text information below is provided only to help identify the target speaker "
+        "and locate the current utterance. Do not infer emotional evidence from the "
+        "dialogue text in this step.\n\n"
+        "### Target Speaker\n"
+        f"{speaker_name(row)}\n\n"
+        "### Current Utterance\n"
+        f"\"{clean_text(row.get('text', ''))}\"\n\n"
+        "### Task\n"
+        "Write a visually grounded description of the target speaker's emotional cues in the video.\n\n"
+        "Focus on the following aspects only when they are visible:\n"
+        "- whether the target speaker can be identified;\n"
+        "- facial expression, including eyes, eyebrows, mouth, smile, frown, tension, surprise, sadness, anger, neutrality, or other visible changes;\n"
+        "- gaze direction, head movement, and eye contact;\n"
+        "- body posture, hand gestures, movement, interpersonal distance, and interaction with others;\n"
+        "- temporal changes across the sampled frames;\n"
+        "- scene atmosphere or reactions of surrounding people, only if they help interpret the target speaker.\n\n"
+        "Rules:\n"
+        "- Do not predict the final emotion label.\n"
+        "- Do not output candidate labels.\n"
+        "- Do not use the dialogue text as emotional evidence.\n"
+        "- Do not invent facial expressions, gestures, or actions that are not visible.\n"
+        "- If the target speaker is not clearly visible or cannot be identified, say this explicitly and describe only reliable visible cues.\n"
+        "- Use cautious language such as \"appears to\", \"seems to\", or \"is not clearly visible\" when the evidence is uncertain.\n"
+        "- Write one compact but detailed paragraph, about 60 to 160 words.\n\n"
+        "Output exactly this schema:\n\n"
+        "VISUAL_REASON: ..."
     )
+
+
+def dialogue_prompt(row, labels, gold):
+    label_text = ", ".join(labels)
+    return (
+        "You are constructing dialogue-only reasoning data for emotion recognition in conversation.\n\n"
+        "You will be given a dialogue context, the current speaker, the current utterance, "
+        "and the target emotion label. Your task is to explain why the target emotion is "
+        "reasonable based only on the dialogue text.\n\n"
+        "### Dialogue Context\n"
+        f"{conversation_text(row)}\n\n"
+        "### Current Speaker\n"
+        f"{speaker_name(row)}\n\n"
+        "### Current Utterance\n"
+        f"\"{clean_text(row.get('text', ''))}\"\n\n"
+        "### Target Emotion Label\n"
+        f"{gold}\n\n"
+        "### Candidate Emotion Labels\n"
+        f"{label_text}\n\n"
+        "### Task\n"
+        f"Write a dialogue-only reasoning explanation for why the current speaker's emotion is \"{gold}\".\n\n"
+        "Analysis requirements:\n"
+        "- Use only the dialogue text and conversational context.\n"
+        "- Do not mention visual, audio, facial expression, body gesture, gaze, or scene evidence.\n"
+        "- Explain lexical evidence, pragmatic meaning, speaker intention, discourse structure, and emotional shift when relevant.\n"
+        "- Explicitly refer to or quote key words from the current utterance or previous turns.\n"
+        "- If the emotion is subtle, explain why it is implied rather than directly stated.\n"
+        "- Do not say that a gold label is provided.\n"
+        "- Write one coherent paragraph, about 80 to 200 words.\n\n"
+        "Output exactly this schema:\n\n"
+        "DIALOGUE_REASON: ..."
+    )
+
+
+def predict_prompt(row, labels, prompt_field):
+    base_prompt = row.get(prompt_field) or (
+        f"Dialogue context:\n{conversation_text(row)}\n\n"
+        f"Current speaker: {speaker_name(row)}\n"
+        f"Current utterance: \"{clean_text(row.get('text', ''))}\""
+    )
+    label_text = ", ".join(labels)
+    return (
+        f"{base_prompt}\n\n"
+        "Diagnostic prediction mode: use the available video and dialogue evidence to predict the emotion.\n"
+        "Output exactly this schema:\n"
+        "FINAL_REASON: one concise sentence.\n"
+        f"FINAL_ANSWER: exactly one lowercase label from this list: {label_text}."
+    )
+
+
+def build_prompt(row, labels, prompt_field, step, gold=None):
+    if step == "visual":
+        return visual_prompt(row)
+    if step == "dialogue":
+        return dialogue_prompt(row, labels, gold or "")
+    if step == "predict":
+        return predict_prompt(row, labels, prompt_field)
+    raise ValueError(f"Unknown step: {step}")
 
 
 def file_url(path):
@@ -139,9 +231,9 @@ def file_url(path):
 
 
 def build_messages(row, labels, args):
-    prompt = build_prompt(row, labels, args.prompt_field, args.step)
+    prompt = build_prompt(row, labels, args.prompt_field, args.step, args.current_gold)
     content = []
-    if args.step == "visual":
+    if args.step in ("visual", "predict"):
         content.append({"type": "video_url", "video_url": {"url": file_url(row["video_path"])}})
     content.append({"type": "text", "text": prompt})
     return [{"role": "user", "content": content}]
@@ -187,10 +279,21 @@ def generate_one(row, labels, args, server):
     raise RuntimeError(last_error)
 
 
-def existing_sample_ids(path):
+def existing_sample_ids(path, step):
     if not Path(path).exists():
         return set()
-    return {row.get("sample_id") for row in read_jsonl(path) if row.get("sample_id")}
+    ids = set()
+    for row in read_jsonl(path):
+        sample_id = row.get("sample_id")
+        if not sample_id:
+            continue
+        if step == "visual" and row.get("visual_reason"):
+            ids.add(sample_id)
+        elif step == "dialogue" and row.get("dialogue_reason"):
+            ids.add(sample_id)
+        elif step == "predict" and row.get("prediction"):
+            ids.add(sample_id)
+    return ids
 
 
 def dataset_cfg(cfg, dataset):
@@ -210,15 +313,20 @@ def default_label_file(cfg, dataset):
 
 
 def default_output(cfg, step, dataset, split, shard):
-    step_key = "step1_visual_reason" if step == "visual" else "step2_dialogue_reason"
-    root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"][step_key]
+    if step == "visual":
+        key = "step1_visual_reason"
+    elif step == "dialogue":
+        key = "step2_dialogue_reason"
+    else:
+        key = "diagnostic_predict"
+    root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"].get(key, key)
     return root / dataset / f"{split}_shard{shard}.jsonl"
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None)
-    parser.add_argument("--step", choices=["visual", "dialogue"], required=True)
+    parser.add_argument("--step", choices=["visual", "dialogue", "predict"], required=True)
     parser.add_argument("--dataset", choices=["meld", "iemocap"], required=True)
     parser.add_argument("--split", default="train")
     parser.add_argument("--manifest")
@@ -254,6 +362,31 @@ def parse_args():
     return args
 
 
+def base_record(row, args, gold, status, raw_output, raw_response, server, started, error):
+    return {
+        "sample_id": row.get("sample_id"),
+        "dataset": args.dataset,
+        "split": args.split,
+        "step": args.step,
+        "status": status,
+        "gold": gold,
+        "teacher_output": raw_output,
+        "server": server,
+        "latency_sec": round(time.time() - started, 4),
+        "error": error,
+        "source": {
+            "video_path": row.get("video_path"),
+            "dialogue_id": row.get("dialogue_id"),
+            "utterance_id": row.get("utterance_id"),
+            "speaker": row.get("speaker"),
+            "speaker_original": row.get("speaker_original"),
+            "text": row.get("text"),
+            "conversation": conversation_text(row),
+        },
+        "raw_response_id": raw_response.get("id") if isinstance(raw_response, dict) else None,
+    }
+
+
 def main():
     args = parse_args()
     random.seed(args.seed)
@@ -266,7 +399,9 @@ def main():
     servers = [server.strip() for server in args.servers.split(",") if server.strip()]
     if not servers:
         raise ValueError("--servers cannot be empty")
-    done_ids = existing_sample_ids(args.output) if args.resume else set()
+    server_for_shard = servers[args.shard_index % len(servers)]
+    done_ids = existing_sample_ids(args.output, args.step) if args.resume else set()
+    counters = Counter(total_samples=len(rows), resumed=len(done_ids))
 
     print(
         json.dumps(
@@ -279,6 +414,7 @@ def main():
                 "done": len(done_ids),
                 "output": args.output,
                 "servers": servers,
+                "server_for_shard": server_for_shard,
             },
             ensure_ascii=False,
         ),
@@ -289,10 +425,11 @@ def main():
         sample_id = row.get("sample_id", f"{args.dataset}_{args.split}_{local_idx}")
         if sample_id in done_ids:
             continue
-        server = servers[(local_idx - 1) % len(servers)]
         started = time.time()
-        gold = str(row.get(args.gold_field, "")).lower()
-        if args.step == "visual" and (not row.get("video_path") or not Path(row["video_path"]).exists()):
+        gold = normalize_label(row.get(args.gold_field, ""))
+        args.current_gold = gold
+        if args.step in ("visual", "predict") and (not row.get("video_path") or not Path(row["video_path"]).exists()):
+            counters["missing_video"] += 1
             append_jsonl(
                 args.output,
                 {
@@ -307,45 +444,45 @@ def main():
             )
             continue
         try:
-            raw_output, raw_response = generate_one(row, labels, args, server)
-            prediction = extract_label(raw_output, labels)
-            status = "ok" if prediction else "ok_unparsed"
+            raw_output, raw_response = generate_one(row, labels, args, server_for_shard)
             error = None
+            if args.step == "visual":
+                reason, status = extract_reason(raw_output, "VISUAL_REASON")
+                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record["visual_reason"] = reason
+                counters["visual_reason_generated" if reason else "visual_reason_empty"] += 1
+            elif args.step == "dialogue":
+                reason, status = extract_reason(raw_output, "DIALOGUE_REASON")
+                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record["dialogue_reason"] = reason
+                counters["dialogue_reason_generated" if reason else "dialogue_reason_empty"] += 1
+            else:
+                prediction = extract_label(raw_output, labels)
+                status = "ok" if prediction else "ok_unparsed"
+                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record["prediction"] = prediction
+                record["correct"] = prediction == gold
+                counters["prediction_generated" if prediction else "prediction_unparsed"] += 1
         except Exception as exc:
-            raw_output = ""
-            raw_response = None
-            prediction = None
-            status = "failed"
-            error = repr(exc)
+            counters["failed"] += 1
+            record = base_record(row, args, gold, "failed", "", None, server_for_shard, started, repr(exc))
 
-        append_jsonl(
-            args.output,
-            {
-                "sample_id": sample_id,
-                "dataset": args.dataset,
-                "split": args.split,
-                "step": args.step,
-                "status": status,
-                "gold": gold,
-                "prediction": prediction,
-                "correct": prediction == gold,
-                "teacher_output": raw_output,
-                "server": server,
-                "latency_sec": round(time.time() - started, 4),
-                "error": error,
-                "source": {
-                    "video_path": row.get("video_path"),
-                    "dialogue_id": row.get("dialogue_id"),
-                    "utterance_id": row.get("utterance_id"),
-                    "speaker": row.get("speaker"),
-                    "text": row.get("text"),
-                    "prompt": row.get(args.prompt_field),
-                },
-                "raw_response_id": raw_response.get("id") if isinstance(raw_response, dict) else None,
-            },
-        )
+        counters[record["status"]] += 1
+        append_jsonl(args.output, record)
         if local_idx % args.log_every == 0:
-            print(json.dumps({"event": "progress", "processed_shard_rows": local_idx, "total_shard_rows": len(rows)}), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "event": "progress",
+                        "processed_shard_rows": local_idx,
+                        "total_shard_rows": len(rows),
+                        "counters": dict(sorted(counters.items())),
+                    }
+                ),
+                flush=True,
+            )
+
+    print(json.dumps({"event": "summary", "counters": dict(sorted(counters.items()))}, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

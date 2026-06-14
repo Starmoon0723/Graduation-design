@@ -21,7 +21,7 @@ vllm:
       tensor_parallel_size: 2
   max_model_len: 131072
   gpu_memory_utilization: 0.90
-  enable_reasoning: true
+  enable_reasoning: false
   reasoning_parser: qwen3
   media_io_kwargs:
     video:

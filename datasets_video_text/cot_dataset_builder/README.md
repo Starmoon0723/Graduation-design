@@ -22,10 +22,11 @@ The model path is set to:
 /HOME/hitsz_mszhang/hitsz_mszhang_1/HDD_POOL/MRC/MRC/MRC_project/others/AAA/vlm/hfmodel/qwen3.6_27b
 ```
 
-The vLLM config follows the Qwen3.6-27B model card style: reasoning is enabled
-with `--enable-reasoning --reasoning-parser qwen3`,
-`--media-io-kwargs '{"video":{"num_frames":-1}}'`, and request-time
-`mm_processor_kwargs` with `fps=2` and `do_sample_frames=true`.
+The vLLM config follows the Qwen3.6-27B model card style where possible:
+`--reasoning-parser qwen3`, `--media-io-kwargs '{"video":{"num_frames":-1}}'`,
+and request-time `mm_processor_kwargs` with `fps=2` and
+`do_sample_frames=true`. Some server vLLM builds do not support
+`--enable-reasoning`; the default config therefore leaves it disabled.
 
 ## 0. Start or Stop vLLM
 

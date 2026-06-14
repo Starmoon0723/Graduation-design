@@ -51,7 +51,7 @@ def build_command(cfg, instance):
         "--media-io-kwargs",
         json_dumps_compact(vllm["media_io_kwargs"]),
     ]
-    if vllm.get("enable_reasoning", True):
+    if vllm.get("enable_reasoning", False):
         cmd.append("--enable-reasoning")
     if vllm.get("reasoning_parser"):
         cmd.extend(["--reasoning-parser", str(vllm["reasoning_parser"])])

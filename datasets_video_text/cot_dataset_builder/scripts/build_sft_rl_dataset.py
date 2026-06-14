@@ -128,6 +128,8 @@ def load_teacher_outputs(patterns, step):
                 sid = source_key(row)
                 if not sid:
                     continue
+                if row.get("status") != "ok":
+                    continue
                 if reason_key not in row:
                     continue
                 copied = dict(row)

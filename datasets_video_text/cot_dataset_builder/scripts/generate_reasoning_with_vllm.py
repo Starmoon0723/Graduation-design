@@ -75,6 +75,14 @@ def speaker_name(row):
     return clean_text(row.get("speaker") or row.get("speaker_original") or "Speaker")
 
 
+def speaker_display(row):
+    speaker = clean_text(row.get("speaker") or "")
+    original = clean_text(row.get("speaker_original") or "")
+    if original and speaker and original != speaker:
+        return f"{original} ({speaker} in the transcript)"
+    return original or speaker or "Speaker"
+
+
 def map_context_speaker(row, speaker):
     speaker_map = row.get("speaker_map") or {}
     return speaker_map.get(str(speaker), str(speaker))
@@ -108,7 +116,7 @@ def extract_label(output_text, labels):
     return None
 
 
-def extract_reason(output_text, field_name):
+def extract_reason(output_text, field_name, strict_schema=False):
     text = (output_text or "").strip()
     if not text:
         return "", "empty"
@@ -116,6 +124,8 @@ def extract_reason(output_text, field_name):
     pattern = rf"{re.escape(field_name)}\s*:\s*(.*)"
     match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
     if not match:
+        if strict_schema:
+            return "", "ok_unparsed"
         return text, "ok_unparsed"
     reason = match.group(1).strip()
     for marker in (
@@ -137,38 +147,38 @@ def extract_reason(output_text, field_name):
 
 def visual_prompt(row):
     return (
-        "You are constructing visually grounded evidence for multimodal emotion recognition in conversation.\n\n"
+        "You are generating the final visual evidence text for a multimodal emotion recognition dataset.\n\n"
         "You are given sampled video frames from the current utterance video clip. "
-        "The text below is provided only to help identify the target speaker and locate "
-        "the current speaking moment. Do not use the meaning of the utterance as "
-        "emotional evidence in this step.\n\n"
+        "The text below is provided only to help identify the target speaker and the "
+        "speaking moment. Do not use the meaning of the utterance as emotional evidence.\n\n"
         "### Target Speaker\n"
-        f"{speaker_name(row)}\n\n"
+        f"{speaker_display(row)}\n\n"
         "### Current Utterance\n"
         f"\"{clean_text(row.get('text', ''))}\"\n\n"
         "### Task\n"
-        "Write a compact but detailed visual evidence paragraph that can later be used "
-        "as part of a reasoning chain for emotion recognition.\n\n"
-        "Your description should focus on observable visual cues of the target speaker. "
-        "When visible, analyze:\n\n"
-        "* whether the target speaker can be identified in the frames;\n"
-        "* facial details: eyes, eyebrows, mouth, smile, frown, jaw tension, facial relaxation or stiffness;\n"
-        "* gaze and head behavior: eye contact, looking away, looking down, head tilt, nodding, shaking, turning;\n"
-        "* body behavior: posture, hand gestures, shoulder tension, leaning forward/backward, stillness, movement, interpersonal distance;\n"
-        "* temporal changes across the sampled frames, such as expression appearing, fading, intensifying, or shifting;\n"
-        "* interaction and scene context, including other people's reactions only when they help interpret the target speaker's visible behavior.\n\n"
-        "Rules:\n"
-        "* Do not predict the final emotion label.\n"
-        "* Do not output candidate labels.\n"
-        "* Do not use the dialogue text as emotional evidence.\n"
-        "* Do not invent facial expressions, gestures, movements, or speaker identity when they are not visible.\n"
-        "* Prefer concrete visual observations over abstract emotion words.\n"
-        "* You may cautiously describe affective implications such as \"tense\", \"relaxed\", \"hesitant\", \"guarded\", \"animated\", \"withdrawn\", or \"high-arousal\", but avoid directly naming a final emotion category.\n"
-        "* If the target speaker is not clearly visible, not identifiable, occluded, too small, or visually ambiguous, state this explicitly and describe only reliable visible cues.\n"
-        "* If the visual evidence is weak, subtle, or neutral-looking, say so explicitly instead of forcing an emotional interpretation.\n"
-        "* Write one coherent paragraph of about 80 to 180 words.\n\n"
-        "Output exactly this schema:\n\n"
-        "VISUAL_REASON: ..."
+        "Describe the observable visual cues of the target speaker that may be useful "
+        "for later emotion reasoning.\n\n"
+        "Focus only on visible evidence:\n"
+        "- target speaker identity and visibility;\n"
+        "- facial expression: eyes, eyebrows, mouth, smile, frown, jaw tension, facial stiffness or relaxation;\n"
+        "- gaze and head movement;\n"
+        "- body posture, hand gesture, stillness, movement, interpersonal distance;\n"
+        "- visible changes across the frames;\n"
+        "- interaction with other people only when it is visually observable.\n\n"
+        "Strict output rules:\n"
+        "- Output only one line beginning with \"VISUAL_REASON:\".\n"
+        "- Do not write \"Thinking Process\", \"Analysis\", \"Step\", \"Identify\", \"Drafting\", or bullet points.\n"
+        "- Do not explain how you solved the task.\n"
+        "- Do not predict the final emotion label.\n"
+        "- Do not output candidate labels.\n"
+        "- Do not use the dialogue meaning as emotional evidence.\n"
+        "- Do not quote or interpret the utterance.\n"
+        "- Do not invent facial expressions, gestures, movements, or speaker identity.\n"
+        "- If the target speaker is not clearly visible or cannot be identified, say so explicitly.\n"
+        "- Use concrete visual observations first. You may use cautious affective words such as tense, relaxed, hesitant, guarded, animated, withdrawn, or low-arousal, but avoid naming a final emotion category.\n"
+        "- Keep the description between 60 and 130 words.\n\n"
+        "Output format:\n"
+        "VISUAL_REASON: <one compact paragraph>"
     )
 
 
@@ -280,24 +290,14 @@ def response_text_and_meta(response):
         return "", {"response_empty_choices": True}
     choice = choices[0]
     message = choice.get("message") or {}
-    candidates = (
-        ("content", message.get("content")),
-        ("reasoning_content", message.get("reasoning_content")),
-        ("reasoning", message.get("reasoning")),
-        ("text", choice.get("text")),
-    )
-    for source, value in candidates:
-        text = flatten_content(value).strip()
-        if text:
-            return text, {
-                "response_text_source": source,
-                "finish_reason": choice.get("finish_reason"),
-                "message_keys": sorted(message.keys()),
-            }
-    return "", {
-        "response_text_source": None,
+    content = flatten_content(message.get("content")).strip()
+    reasoning_content = flatten_content(message.get("reasoning_content"))
+    return content, {
+        "response_text_source": "content" if content else None,
         "finish_reason": choice.get("finish_reason"),
         "message_keys": sorted(message.keys()),
+        "has_reasoning_content": bool(reasoning_content.strip()),
+        "reasoning_content_chars": len(reasoning_content),
     }
 
 
@@ -341,11 +341,11 @@ def existing_sample_ids(path, step):
         sample_id = row.get("sample_id")
         if not sample_id:
             continue
-        if step == "visual" and row.get("visual_reason"):
+        if step == "visual" and row.get("status") == "ok" and row.get("visual_reason"):
             ids.add(sample_id)
-        elif step == "dialogue" and row.get("dialogue_reason"):
+        elif step == "dialogue" and row.get("status") == "ok" and row.get("dialogue_reason"):
             ids.add(sample_id)
-        elif step == "predict" and row.get("prediction"):
+        elif step == "predict" and row.get("status") == "ok" and row.get("prediction"):
             ids.add(sample_id)
     return ids
 
@@ -436,6 +436,7 @@ def base_record(row, args, gold, status, raw_output, raw_response, response_meta
             "utterance_id": row.get("utterance_id"),
             "speaker": row.get("speaker"),
             "speaker_original": row.get("speaker_original"),
+            "speaker_display": speaker_display(row),
             "text": row.get("text"),
             "conversation": conversation_text(row),
         },
@@ -504,14 +505,14 @@ def main():
             raw_output, raw_response, response_meta = generate_one(row, labels, args, server_for_shard)
             error = None
             if args.step == "visual":
-                reason, status = extract_reason(raw_output, "VISUAL_REASON")
+                reason, status = extract_reason(raw_output, "VISUAL_REASON", strict_schema=True)
                 record = base_record(
                     row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
                 )
                 record["visual_reason"] = reason
                 counters["visual_reason_generated" if reason else "visual_reason_empty"] += 1
             elif args.step == "dialogue":
-                reason, status = extract_reason(raw_output, "DIALOGUE_REASON")
+                reason, status = extract_reason(raw_output, "DIALOGUE_REASON", strict_schema=True)
                 record = base_record(
                     row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
                 )

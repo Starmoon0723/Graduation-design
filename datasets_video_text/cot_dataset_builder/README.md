@@ -22,13 +22,13 @@ The model path is set to:
 /HOME/hitsz_mszhang/hitsz_mszhang_1/HDD_POOL/MRC/MRC/MRC_project/others/AAA/vlm/hfmodel/qwen3.6_27b
 ```
 
-The vLLM config uses `--media-io-kwargs '{"video":{"num_frames":-1}}'` and
-request-time `mm_processor_kwargs` with `fps=2` and `do_sample_frames=true`.
-Reasoning parsing is disabled by default because this evidence-generation
-pipeline expects normal `message.content`; some vLLM/Qwen reasoning-parser
-combinations can return `content=null` and put text under `reasoning_content`.
-The client still reads `reasoning_content` as a fallback and records
-`response_meta` for debugging empty responses.
+The vLLM config uses `--reasoning-parser qwen3`,
+`--media-io-kwargs '{"video":{"num_frames":-1}}'`, and request-time
+`mm_processor_kwargs` with `fps=2` and `do_sample_frames=true`. The dataset
+generator only reads normal `message.content` as the final answer text.
+`reasoning_content` is treated as internal reasoning and is never used as
+`VISUAL_REASON` or `DIALOGUE_REASON`; the client records only whether it exists
+inside `response_meta` for debugging empty responses.
 
 ## 0. Start or Stop vLLM
 
@@ -96,9 +96,11 @@ dialogue: max_tokens=768
 predict:  max_tokens=256
 ```
 
-If a previous run produced rows with an empty `visual_reason` or
-`dialogue_reason`, `RESUME=1` will not treat those rows as finished; rerunning
-the same command will retry them and append a later corrected row.
+If a previous run produced rows with an empty reason, truncated analysis, or
+`status=ok_unparsed`, `RESUME=1` will not treat those rows as finished. Rerunning
+the same command will retry them and append a later corrected row. Step 3 reads
+only `status=ok` reason rows, so old malformed `Thinking Process` outputs are
+ignored.
 
 Optional teacher classification diagnostics can be run separately:
 

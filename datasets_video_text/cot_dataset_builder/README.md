@@ -49,9 +49,10 @@ for two A800 80GB cards per instance.
 ## 1. Visual Reasoning Data
 
 This step sends the current utterance video plus a small target-speaker locator
-prompt to Qwen3.6-27B. The text is only for locating the speaker/utterance; the
-teacher must not use dialogue text as emotional evidence and must not predict a
-final label. The output field is only `VISUAL_REASON`.
+prompt to Qwen3.6-27B. The text is only for locating the speaker/current
+speaking moment; the teacher must not use utterance meaning as emotional
+evidence and must not predict a final label. The output field is only
+`VISUAL_REASON`, written as one concrete visual-evidence paragraph.
 
 ```bash
 STEP=visual DATASET=iemocap SPLIT=train \

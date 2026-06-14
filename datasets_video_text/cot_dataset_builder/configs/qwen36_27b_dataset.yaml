@@ -22,7 +22,7 @@ vllm:
   max_model_len: 131072
   gpu_memory_utilization: 0.90
   enable_reasoning: false
-  reasoning_parser: qwen3
+  reasoning_parser: null
   media_io_kwargs:
     video:
       num_frames: -1
@@ -31,13 +31,17 @@ vllm:
 generation:
   fps: 2
   do_sample_frames: true
-  max_tokens: 4096
+  max_tokens: 1024
+  max_tokens_visual: 512
+  max_tokens_dialogue: 768
+  max_tokens_predict: 256
   temperature: 1.0
   top_p: 0.95
   top_k: 20
   presence_penalty: 0.0
   timeout_sec: 900
   max_retries: 3
+  empty_output_retries: 1
 
 data:
   prompt_version: new

@@ -256,6 +256,51 @@ def post_chat_completion(base_url, payload, timeout):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def flatten_content(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts)
+    return str(value)
+
+
+def response_text_and_meta(response):
+    choices = response.get("choices") or []
+    if not choices:
+        return "", {"response_empty_choices": True}
+    choice = choices[0]
+    message = choice.get("message") or {}
+    candidates = (
+        ("content", message.get("content")),
+        ("reasoning_content", message.get("reasoning_content")),
+        ("reasoning", message.get("reasoning")),
+        ("text", choice.get("text")),
+    )
+    for source, value in candidates:
+        text = flatten_content(value).strip()
+        if text:
+            return text, {
+                "response_text_source": source,
+                "finish_reason": choice.get("finish_reason"),
+                "message_keys": sorted(message.keys()),
+            }
+    return "", {
+        "response_text_source": None,
+        "finish_reason": choice.get("finish_reason"),
+        "message_keys": sorted(message.keys()),
+    }
+
+
 def generate_one(row, labels, args, server):
     payload = {
         "model": args.model,
@@ -273,10 +318,15 @@ def generate_one(row, labels, args, server):
         },
     }
     last_error = None
-    for attempt in range(1, args.max_retries + 1):
+    max_attempts = args.max_retries + args.empty_output_retries
+    for attempt in range(1, max_attempts + 1):
         try:
             response = post_chat_completion(server, payload, args.timeout_sec)
-            return response["choices"][0]["message"].get("content", ""), response
+            text, response_meta = response_text_and_meta(response)
+            if text or attempt > args.empty_output_retries:
+                return text, response, response_meta
+            last_error = "empty_response_text"
+            time.sleep(min(10, 2**attempt))
         except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
             last_error = repr(exc)
             time.sleep(min(30, 2**attempt))
@@ -356,17 +406,19 @@ def parse_args():
     args.output = args.output or str(default_output(cfg, args.step, args.dataset, args.split, args.shard_index))
     args.fps = float(gen.get("fps", 2))
     args.do_sample_frames = bool(gen.get("do_sample_frames", True))
-    args.max_tokens = int(gen.get("max_tokens", 4096))
+    step_max_tokens_key = f"max_tokens_{args.step}"
+    args.max_tokens = int(gen.get(step_max_tokens_key, gen.get("max_tokens", 1024)))
     args.temperature = float(gen.get("temperature", 1.0))
     args.top_p = float(gen.get("top_p", 0.95))
     args.top_k = int(gen.get("top_k", 20))
     args.presence_penalty = float(gen.get("presence_penalty", 0.0))
     args.timeout_sec = int(gen.get("timeout_sec", 900))
     args.max_retries = int(gen.get("max_retries", 3))
+    args.empty_output_retries = int(gen.get("empty_output_retries", 0))
     return args
 
 
-def base_record(row, args, gold, status, raw_output, raw_response, server, started, error):
+def base_record(row, args, gold, status, raw_output, raw_response, response_meta, server, started, error):
     return {
         "sample_id": row.get("sample_id"),
         "dataset": args.dataset,
@@ -388,6 +440,7 @@ def base_record(row, args, gold, status, raw_output, raw_response, server, start
             "conversation": conversation_text(row),
         },
         "raw_response_id": raw_response.get("id") if isinstance(raw_response, dict) else None,
+        "response_meta": response_meta or {},
     }
 
 
@@ -448,28 +501,34 @@ def main():
             )
             continue
         try:
-            raw_output, raw_response = generate_one(row, labels, args, server_for_shard)
+            raw_output, raw_response, response_meta = generate_one(row, labels, args, server_for_shard)
             error = None
             if args.step == "visual":
                 reason, status = extract_reason(raw_output, "VISUAL_REASON")
-                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record = base_record(
+                    row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
+                )
                 record["visual_reason"] = reason
                 counters["visual_reason_generated" if reason else "visual_reason_empty"] += 1
             elif args.step == "dialogue":
                 reason, status = extract_reason(raw_output, "DIALOGUE_REASON")
-                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record = base_record(
+                    row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
+                )
                 record["dialogue_reason"] = reason
                 counters["dialogue_reason_generated" if reason else "dialogue_reason_empty"] += 1
             else:
                 prediction = extract_label(raw_output, labels)
                 status = "ok" if prediction else "ok_unparsed"
-                record = base_record(row, args, gold, status, raw_output, raw_response, server_for_shard, started, error)
+                record = base_record(
+                    row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
+                )
                 record["prediction"] = prediction
                 record["correct"] = prediction == gold
                 counters["prediction_generated" if prediction else "prediction_unparsed"] += 1
         except Exception as exc:
             counters["failed"] += 1
-            record = base_record(row, args, gold, "failed", "", None, server_for_shard, started, repr(exc))
+            record = base_record(row, args, gold, "failed", "", None, None, server_for_shard, started, repr(exc))
 
         counters[record["status"]] += 1
         append_jsonl(args.output, record)

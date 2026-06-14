@@ -40,3 +40,9 @@ datasets_video_text/results/*
 !datasets_video_text/results/**/*.json
 datasets_video_text/results/**/*.jsonl
 datasets_video_text/results/**/*.log
+
+# CoT dataset builder generated outputs.
+datasets_video_text/cot_dataset_builder/logs/
+datasets_video_text/cot_dataset_builder/results/**/*.jsonl
+!datasets_video_text/cot_dataset_builder/results/**/
+!datasets_video_text/cot_dataset_builder/results/**/*.json

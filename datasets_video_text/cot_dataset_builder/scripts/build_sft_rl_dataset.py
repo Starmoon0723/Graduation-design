@@ -171,8 +171,18 @@ def validate_sample(row, labels, visual_row, dialogue_row, fusion_row, args):
     video_path = row.get("video_path")
     visual_reason = fallback_reason_from_row(visual_row or {}, "VISUAL_REASON", "visual_reason")
     dialogue_reason = fallback_reason_from_row(dialogue_row or {}, "DIALOGUE_REASON", "dialogue_reason")
-    fusion_response = (fusion_row or {}).get("teacher_output", "")
-    fusion_reason, final_answer, fusion_status, parse_error = parse_fusion_response(fusion_response, gold, labels)
+    raw_fusion_output = (fusion_row or {}).get("teacher_output", "")
+    fusion_response = (fusion_row or {}).get("fusion_response")
+    if fusion_response:
+        fusion_reason = (fusion_row or {}).get("fusion_reason")
+        final_answer = normalize_label((fusion_row or {}).get("final_answer"))
+        parsed_response = fusion_response
+        fusion_status = "ok" if fusion_reason and final_answer == gold and final_answer in labels else "parse_failed"
+        parse_error = None if fusion_status == "ok" else "invalid_cached_fusion_response"
+    else:
+        fusion_reason, final_answer, parsed_response, fusion_status, parse_error = parse_fusion_response(
+            raw_fusion_output, gold, labels
+        )
 
     if not visual_row:
         failures.append("missing_visual_reason")
@@ -212,7 +222,7 @@ def validate_sample(row, labels, visual_row, dialogue_row, fusion_row, args):
         "gold": gold,
         "visual_reason": visual_reason,
         "dialogue_reason": dialogue_reason,
-        "fusion_response": fusion_response,
+        "fusion_response": parsed_response,
         "fusion_reason": fusion_reason,
         "final_answer": final_answer,
         "fusion_flags": count_fusion_flags(fusion_reason or ""),
@@ -288,7 +298,7 @@ def main():
     source_rows = list(read_jsonl(args.manifest))
     visual_by_id = load_rows_by_id(args.visual_pattern, "visual", "visual_reason")
     dialogue_by_id = load_rows_by_id(args.dialogue_pattern, "dialogue", "dialogue_reason")
-    fusion_by_id = load_rows_by_id(args.fusion_pattern, "fusion", "teacher_output")
+    fusion_by_id = load_rows_by_id(args.fusion_pattern, "fusion")
 
     sft_rows = []
     rl_rows = []

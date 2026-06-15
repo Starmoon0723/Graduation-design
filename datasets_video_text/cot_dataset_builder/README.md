@@ -107,12 +107,20 @@ are ignored.
 
 This step does not send video. It reads the original manifest row, the
 `VISUAL_REASON` from step 1, the `DIALOGUE_REASON` from step 2, the candidate
-labels, and the manifest gold label. Qwen3.6-27B then writes the final
-gold-aligned multimodal reasoning response:
+labels, and the manifest gold label. Qwen3.6-27B writes a normal text protocol
+instead of literal `<think>` tags, which avoids conflicts with Qwen/vLLM
+reasoning parsing:
+
+```text
+FUSION_REASON: ...
+FINAL_ANSWER: gold
+```
+
+The script then normalizes that into the final SFT assistant response:
 
 ```text
 <think>
-...
+FUSION_REASON text
 </think>
 <answer>
 gold
@@ -166,8 +174,8 @@ datasets_video_text/cot_dataset_builder/results/qwen36_27b/final_preferences/{da
 ```
 
 Step 3 reads both `VISUAL_REASON` and `DIALOGUE_REASON`, applies basic quality
-checks, and uses the step 3 fusion response directly as the SFT assistant
-response. It no longer rule-concatenates visual and dialogue reasons.
+checks, and uses the normalized step 3 `fusion_response` directly as the SFT
+assistant response. It no longer rule-concatenates visual and dialogue reasons.
 
 SFT no longer depends on teacher prediction correctness. RL files are GRPO-ready
 prompts with reference visual/dialogue/fusion reasons and no precomputed 0/1

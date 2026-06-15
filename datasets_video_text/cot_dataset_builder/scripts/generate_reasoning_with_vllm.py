@@ -200,25 +200,31 @@ def has_instruction_leak(text):
 def parse_fusion_response(output_text, gold, labels):
     text = (output_text or "").strip()
     if not text:
-        return None, None, "parse_failed", "empty_output"
-    think_match = re.search(r"<think>\s*(.*?)\s*</think>", text, flags=re.IGNORECASE | re.DOTALL)
-    answer_match = re.search(r"<answer>\s*(.*?)\s*</answer>", text, flags=re.IGNORECASE | re.DOTALL)
-    if not think_match or not answer_match:
-        return None, None, "parse_failed", "missing_think_or_answer"
-    think = think_match.group(1).strip()
+        return None, None, None, "parse_failed", "empty_output"
+    text = re.sub(r"^```(?:text)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    reason_match = re.search(
+        r"FUSION_REASON\s*:\s*(.*?)(?:\n\s*FINAL_ANSWER\s*:|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    answer_match = re.search(r"FINAL_ANSWER\s*:\s*([^\n\r<]+)", text, flags=re.IGNORECASE)
+    if not reason_match or not answer_match:
+        return None, None, None, "parse_failed", "missing_fusion_reason_or_answer"
+    think = reason_match.group(1).strip()
     raw_answer = answer_match.group(1).strip()
     answer = normalize_label(raw_answer)
     if not think:
-        return None, answer, "parse_failed", "empty_think"
+        return None, answer, None, "parse_failed", "empty_fusion_reason"
     if has_instruction_leak(think):
-        return think, answer, "parse_failed", "instruction_leak"
+        return think, answer, None, "parse_failed", "instruction_leak"
     if raw_answer != raw_answer.lower():
-        return think, answer, "parse_failed", "answer_not_lowercase"
+        return think, answer, None, "parse_failed", "answer_not_lowercase"
     if answer not in labels:
-        return think, answer, "parse_failed", "answer_not_in_labels"
+        return think, answer, None, "parse_failed", "answer_not_in_labels"
     if answer != gold:
-        return think, answer, "parse_failed", "answer_not_gold"
-    return think, answer, "ok", None
+        return think, answer, None, "parse_failed", "answer_not_gold"
+    fusion_response = f"<think>\n{think}\n</think>\n<answer>\n{answer}\n</answer>"
+    return think, answer, fusion_response, "ok", None
 
 
 def count_fusion_flags(text):
@@ -342,13 +348,9 @@ def fusion_prompt(row, labels, gold, visual_reason, dialogue_reason):
         "- The reasoning should mention both modalities, but it should weight them differently depending on their reliability.\n"
         "- Avoid mechanical phrasing. Write a natural, coherent reasoning paragraph.\n"
         "- Keep the reasoning between 120 and 260 words.\n\n"
-        "Output exactly in this format:\n\n"
-        "<think>\n"
-        "...\n"
-        "</think>\n"
-        "<answer>\n"
-        f"{gold}\n"
-        "</answer>"
+        "Output exactly this schema:\n\n"
+        "FUSION_REASON: one natural paragraph of 120 to 260 words\n"
+        f"FINAL_ANSWER: {gold}"
     )
 
 
@@ -745,12 +747,15 @@ def main():
                 record["dialogue_reason"] = reason
                 counters["dialogue_reason_generated" if reason else "dialogue_reason_parse_failed"] += 1
             elif args.step == "fusion":
-                fusion_reason, final_answer, status, parse_error = parse_fusion_response(raw_output, gold, labels)
+                fusion_reason, final_answer, fusion_response, status, parse_error = parse_fusion_response(
+                    raw_output, gold, labels
+                )
                 record = base_record(
                     row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
                 )
                 record["fusion_reason"] = fusion_reason
                 record["final_answer"] = final_answer
+                record["fusion_response"] = fusion_response
                 record["parse_error"] = parse_error
                 record["visual_reason"] = args.current_visual_reason
                 record["dialogue_reason"] = args.current_dialogue_reason

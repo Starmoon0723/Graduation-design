@@ -72,7 +72,7 @@ FUSION_KEYWORDS = {
 }
 
 
-def read_jsonl(path):
+def read_jsonl(path, skip_invalid=False):
     with Path(path).open("r", encoding="utf-8") as f:
         for line_no, line in enumerate(f, 1):
             line = line.strip()
@@ -81,6 +81,8 @@ def read_jsonl(path):
             try:
                 yield json.loads(line)
             except json.JSONDecodeError as exc:
+                if skip_invalid:
+                    continue
                 raise ValueError(f"Invalid JSON at {path}:{line_no}: {exc}") from exc
 
 
@@ -528,7 +530,7 @@ def load_reason_map(patterns, reason_step):
     by_id = {}
     for pattern in patterns:
         for file in sorted(glob.glob(str(pattern))):
-            for row in read_jsonl(file):
+            for row in read_jsonl(file, skip_invalid=True):
                 if row.get("status") != "ok":
                     continue
                 sample_id = row.get("sample_id")
@@ -563,6 +565,11 @@ def parse_args():
     parser.add_argument("--servers", required=True, help="Comma-separated OpenAI base URLs, e.g. http://127.0.0.1:18000/v1,http://127.0.0.1:18001/v1")
     parser.add_argument("--visual-reason-file", "--visual_reason_file", action="append")
     parser.add_argument("--dialogue-reason-file", "--dialogue_reason_file", action="append")
+    parser.add_argument(
+        "--only-available-reasons",
+        action="store_true",
+        help="For fusion, process only manifest rows that already have both visual and dialogue reason rows.",
+    )
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0)
@@ -627,19 +634,31 @@ def main():
     args = parse_args()
     random.seed(args.seed)
     labels = load_labels(args.label_file)
+    visual_by_id = load_reason_map(args.visual_reason_file, "visual") if args.step == "fusion" else {}
+    dialogue_by_id = load_reason_map(args.dialogue_reason_file, "dialogue") if args.step == "fusion" else {}
     rows = list(read_jsonl(args.manifest))
+    total_manifest_rows = len(rows)
+    if args.step == "fusion" and args.only_available_reasons:
+        available_ids = set(visual_by_id) & set(dialogue_by_id)
+        rows = [row for row in rows if row.get("sample_id") in available_ids]
     rows = [row for idx, row in enumerate(rows) if idx % args.num_shards == args.shard_index]
     if args.limit > 0:
         rows = rows[: args.limit]
-    visual_by_id = load_reason_map(args.visual_reason_file, "visual") if args.step == "fusion" else {}
-    dialogue_by_id = load_reason_map(args.dialogue_reason_file, "dialogue") if args.step == "fusion" else {}
 
     servers = [server.strip() for server in args.servers.split(",") if server.strip()]
     if not servers:
         raise ValueError("--servers cannot be empty")
     server_for_shard = servers[args.shard_index % len(servers)]
     done_ids = existing_sample_ids(args.output, args.step) if args.resume else set()
-    counters = Counter(total_samples=len(rows), resumed=len(done_ids))
+    counters = Counter(
+        total_manifest_samples=total_manifest_rows,
+        total_samples=len(rows),
+        resumed=len(done_ids),
+    )
+    if args.step == "fusion":
+        counters["visual_reason_rows_loaded"] = len(visual_by_id)
+        counters["dialogue_reason_rows_loaded"] = len(dialogue_by_id)
+        counters["available_reason_intersection"] = len(set(visual_by_id) & set(dialogue_by_id))
 
     print(
         json.dumps(
@@ -655,6 +674,8 @@ def main():
                 "server_for_shard": server_for_shard,
                 "visual_reason_files": args.visual_reason_file if args.step == "fusion" else None,
                 "dialogue_reason_files": args.dialogue_reason_file if args.step == "fusion" else None,
+                "only_available_reasons": args.only_available_reasons if args.step == "fusion" else None,
+                "total_manifest_rows": total_manifest_rows,
             },
             ensure_ascii=False,
         ),

@@ -88,19 +88,56 @@ bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
 
 Use `LIMIT=100` for a quick smoke run.
 
-The generator uses step-specific token limits to avoid long empty generations:
+The generator uses step-specific token limits from the YAML config:
 
 ```text
-visual:   max_tokens=512
-dialogue: max_tokens=768
-predict:  max_tokens=256
+visual:   max_tokens_visual
+dialogue: max_tokens_dialogue
+fusion:   max_tokens_fusion
+predict:  max_tokens_predict
 ```
 
 If a previous run produced rows with an empty reason, truncated analysis, or
 `status=ok_unparsed`, `RESUME=1` will not treat those rows as finished. Rerunning
-the same command will retry them and append a later corrected row. Step 3 reads
-only `status=ok` reason rows, so old malformed `Thinking Process` outputs are
-ignored.
+the same command will retry them and append a later corrected row. Later stages
+read only `status=ok` reason rows, so old malformed `Thinking Process` outputs
+are ignored.
+
+## 3. Multimodal Fusion Reasoning
+
+This step does not send video. It reads the original manifest row, the
+`VISUAL_REASON` from step 1, the `DIALOGUE_REASON` from step 2, the candidate
+labels, and the manifest gold label. Qwen3.6-27B then writes the final
+gold-aligned multimodal reasoning response:
+
+```text
+<think>
+...
+</think>
+<answer>
+gold
+</answer>
+```
+
+Run fusion after visual and dialogue reasoning are available:
+
+```bash
+STEP=fusion DATASET=all SPLIT=train \
+bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
+```
+
+Or run all three reasoning stages in sequence:
+
+```bash
+STEP=all_reasoning DATASET=all SPLIT=train \
+bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
+```
+
+Output:
+
+```text
+datasets_video_text/cot_dataset_builder/results/qwen36_27b/step3_fusion_reason/
+```
 
 Optional teacher classification diagnostics can be run separately:
 
@@ -111,9 +148,9 @@ bash datasets_video_text/cot_dataset_builder/scripts/run_reasoning_generation.sh
 
 The diagnostic output is not used as the sole SFT filter.
 
-## 3. Build SFT, RL, and Preference Files
+## 4. Build SFT, RL, and Preference Files
 
-After teacher generation finishes:
+After steps 1-3 finish:
 
 ```bash
 DATASET=all SPLIT=train \
@@ -129,27 +166,10 @@ datasets_video_text/cot_dataset_builder/results/qwen36_27b/final_preferences/{da
 ```
 
 Step 3 reads both `VISUAL_REASON` and `DIALOGUE_REASON`, applies basic quality
-checks, and constructs the final student sample with the manifest gold label:
-
-```text
-<think>
-Visual evidence: ...
-
-Dialogue evidence: ...
-
-Integrated evidence sentence using the manifest gold label.
-</think>
-<answer>
-gold
-</answer>
-```
+checks, and uses the step 3 fusion response directly as the SFT assistant
+response. It no longer rule-concatenates visual and dialogue reasons.
 
 SFT no longer depends on teacher prediction correctness. RL files are GRPO-ready
-prompts with reference reasons and no precomputed 0/1 reward. Preference data is
-not auto-created from wrong teacher predictions. To create weak answer-only
-preferences, run:
-
-```bash
-BUILD_WEAK_PREFERENCES=1 DATASET=all SPLIT=train \
-bash datasets_video_text/cot_dataset_builder/scripts/run_build_sft_rl.sh
-```
+prompts with reference visual/dialogue/fusion reasons and no precomputed 0/1
+reward. Preference data is not auto-created without an external rejected
+response source, so `final_preferences` is empty by default.

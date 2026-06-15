@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import glob
-import hashlib
 import json
 import re
 from collections import Counter
@@ -10,54 +9,39 @@ from pathlib import Path
 from config_utils import load_config, resolve_project_path
 from generate_reasoning_with_vllm import (
     conversation_text,
+    count_fusion_flags,
     dataset_cfg,
     extract_reason,
+    has_instruction_leak,
     load_labels,
     normalize_label,
+    parse_fusion_response,
     read_jsonl,
-    speaker_name,
+    speaker_display,
 )
 
 
-VISUAL_WORD_RANGE = (30, 220)
-DIALOGUE_WORD_RANGE = (50, 260)
-VISUAL_LEAK_TERMS = (
+THINK_WORD_RANGE = (80, 320)
+DIALOGUE_VISUAL_LEAK_TERMS = (
+    "video",
+    "visual",
     "face",
     "facial",
-    "facial expression",
     "gesture",
-    "gestures",
     "gaze",
-    "video",
-    "frame",
-    "frames",
-    "visible",
-    "visual",
-    "body language",
     "posture",
-    "eye contact",
-    "smile",
-    "frown",
+    "body language",
+    "audio",
+    "voice",
+    "scene",
 )
-FINAL_LABEL_PATTERNS = (
-    r"\bfinal\s+(emotion|label|answer)\s+is\b",
-    r"\bthe\s+final\s+(emotion|label|answer)\b",
+VISUAL_FINAL_LEAK_PATTERNS = (
     r"\bfinal_answer\b",
     r"<answer>",
-    r"\bthe\s+emotion\s+is\s+best\s+identified\s+as\b",
-    r"\bthe\s+speaker'?s\s+emotion\s+is\b",
+    r"\bfinal\s+(emotion|label|answer)\b",
+    r"\bcandidate emotion labels\b",
+    r"\bcandidate labels\b",
 )
-
-INTEGRATION_TEMPLATES = [
-    'Taken together, the visible behavior and the conversational context support the label "{gold}".',
-    'The dialogue provides the main emotional direction, while the video evidence offers additional grounding for "{gold}".',
-    'The visual cues and textual context are consistent with the target emotion "{gold}".',
-    'Although the visual evidence may be subtle, it can be considered together with the dialogue context to support "{gold}".',
-    'Both sources of evidence point toward "{gold}" when the utterance is interpreted in context.',
-    'The observable behavior and the wording of the utterance jointly make "{gold}" the most appropriate label.',
-    'The video evidence grounds the speaker state, and the dialogue evidence explains why "{gold}" fits this turn.',
-    'Considering the visual evidence alongside the conversational meaning, "{gold}" is the best supported emotion.',
-]
 
 
 def write_jsonl(path, rows):
@@ -87,60 +71,39 @@ def contains_any(text, terms):
     return False
 
 
-def has_final_label_leak(text):
+def has_visual_final_leak(text, labels):
     lowered = (text or "").lower()
-    return any(re.search(pattern, lowered) for pattern in FINAL_LABEL_PATTERNS)
+    if any(re.search(pattern, lowered) for pattern in VISUAL_FINAL_LEAK_PATTERNS):
+        return True
+    label_list = ", ".join(labels).lower()
+    return label_list in lowered
 
 
-def choose_template(sample_id):
-    digest = hashlib.md5(str(sample_id).encode("utf-8")).hexdigest()
-    return INTEGRATION_TEMPLATES[int(digest[:8], 16) % len(INTEGRATION_TEMPLATES)]
-
-
-def choose_wrong_label(sample_id, labels, gold):
-    candidates = [label for label in labels if label != gold]
-    if not candidates:
-        return None
-    digest = hashlib.md5((str(sample_id) + gold).encode("utf-8")).hexdigest()
-    return candidates[int(digest[:8], 16) % len(candidates)]
-
-
-def source_key(row):
-    return row.get("sample_id")
-
-
-def reason_from_teacher(row, step):
-    field = "VISUAL_REASON" if step == "visual" else "DIALOGUE_REASON"
-    key = "visual_reason" if step == "visual" else "dialogue_reason"
-    reason = (row.get(key) or "").strip()
-    if reason:
-        return reason
-    reason, _ = extract_reason(row.get("teacher_output", ""), field)
-    return reason.strip()
-
-
-def load_teacher_outputs(patterns, step):
+def load_rows_by_id(patterns, expected_step, reason_key=None):
     by_id = {}
-    reason_key = "visual_reason" if step == "visual" else "dialogue_reason"
     for pattern in patterns:
         for file in sorted(glob.glob(str(pattern))):
             for row in read_jsonl(file):
-                sid = source_key(row)
-                if not sid:
-                    continue
                 if row.get("status") != "ok":
                     continue
-                if reason_key not in row:
+                if row.get("step") != expected_step:
                     continue
-                copied = dict(row)
-                copied[f"{step}_reason"] = reason_from_teacher(row, step)
-                by_id[sid] = copied
+                sample_id = row.get("sample_id")
+                if not sample_id:
+                    continue
+                if reason_key and not row.get(reason_key):
+                    continue
+                by_id[sample_id] = row
     return by_id
 
 
 def default_patterns(cfg, dataset, split, step):
-    step_key = "step1_visual_reason" if step == "visual" else "step2_dialogue_reason"
-    root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"][step_key]
+    key_map = {
+        "visual": "step1_visual_reason",
+        "dialogue": "step2_dialogue_reason",
+        "fusion": "step3_fusion_reason",
+    }
+    root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"][key_map[step]]
     return [root / dataset / f"{split}_shard*.jsonl"]
 
 
@@ -171,19 +134,19 @@ def build_student_user_prompt(row, labels):
         "<video>\n"
         "You are an expert in multimodal emotion recognition in conversation.\n\n"
         "You will be given the video clip of the current utterance and the dialogue context. "
-        "Analyze the current speaker's emotion using both the visual evidence from the video "
-        "and the textual evidence from the conversation.\n\n"
+        "Analyze the current speaker's emotion using both the video and the dialogue context.\n\n"
         "### Dialogue Context\n"
         f"{conversation_text(row)}\n\n"
         "### Current Speaker\n"
-        f"{speaker_name(row)}\n\n"
+        f"{speaker_display(row)}\n\n"
         "### Current Utterance\n"
         f"\"{str(row.get('text', '')).strip()}\"\n\n"
         "### Candidate Emotion Labels\n"
         f"{label_text}\n\n"
         "### Task\n"
-        "First reason about the speaker's emotion using visual evidence and dialogue evidence. "
-        "Then output exactly one final emotion label.\n\n"
+        "First reason about the current speaker's emotion using the visual evidence from "
+        "the video and the textual evidence from the dialogue context. Then output exactly "
+        "one final emotion label.\n\n"
         "Output format:\n"
         "<think>\n"
         "...\n"
@@ -194,59 +157,71 @@ def build_student_user_prompt(row, labels):
     )
 
 
-def build_sft_assistant_response(visual_reason, dialogue_reason, gold, sample_id):
-    integration = choose_template(sample_id).format(gold=gold)
-    return (
-        "<think>\n"
-        f"Visual evidence: {visual_reason.strip()}\n\n"
-        f"Dialogue evidence: {dialogue_reason.strip()}\n\n"
-        f"{integration}\n"
-        "</think>\n"
-        "<answer>\n"
-        f"{gold}\n"
-        "</answer>"
-    )
+def fallback_reason_from_row(row, field_name, key_name):
+    reason = row.get(key_name)
+    if reason:
+        return reason
+    reason, status = extract_reason(row.get("teacher_output", ""), field_name, strict_schema=True)
+    return reason if status == "ok" else None
 
 
-def check_quality(row, labels, visual_reason, dialogue_reason, args):
-    reasons = []
+def validate_sample(row, labels, visual_row, dialogue_row, fusion_row, args):
+    failures = []
     gold = normalize_label(row.get(args.gold_field, ""))
     video_path = row.get("video_path")
-    visual_words = word_count(visual_reason)
-    dialogue_words = word_count(dialogue_reason)
+    visual_reason = fallback_reason_from_row(visual_row or {}, "VISUAL_REASON", "visual_reason")
+    dialogue_reason = fallback_reason_from_row(dialogue_row or {}, "DIALOGUE_REASON", "dialogue_reason")
+    fusion_response = (fusion_row or {}).get("teacher_output", "")
+    fusion_reason, final_answer, fusion_status, parse_error = parse_fusion_response(fusion_response, gold, labels)
 
-    if not visual_reason:
-        reasons.append("missing_visual_reason")
-    elif visual_words < VISUAL_WORD_RANGE[0]:
-        reasons.append("visual_too_short")
-    elif visual_words > VISUAL_WORD_RANGE[1]:
-        reasons.append("visual_too_long")
-
-    if not dialogue_reason:
-        reasons.append("missing_dialogue_reason")
-    elif dialogue_words < DIALOGUE_WORD_RANGE[0]:
-        reasons.append("dialogue_too_short")
-    elif dialogue_words > DIALOGUE_WORD_RANGE[1]:
-        reasons.append("dialogue_too_long")
-
-    if dialogue_reason and contains_any(dialogue_reason, VISUAL_LEAK_TERMS):
-        reasons.append("dialogue_visual_leak")
-    if visual_reason and has_final_label_leak(visual_reason):
-        reasons.append("visual_final_label_leak")
-    if gold not in labels:
-        reasons.append("invalid_gold_label")
+    if not visual_row:
+        failures.append("missing_visual_reason")
+    if not dialogue_row:
+        failures.append("missing_dialogue_reason")
+    if not fusion_row:
+        failures.append("missing_fusion_response")
     if not video_path:
-        reasons.append("missing_video")
+        failures.append("missing_video")
     elif not args.skip_video_exists_check and not Path(video_path).exists():
-        reasons.append("missing_video")
+        failures.append("missing_video")
+    if gold not in labels:
+        failures.append("invalid_gold_label")
+    if not visual_reason:
+        failures.append("missing_visual_reason_text")
+    if not dialogue_reason:
+        failures.append("missing_dialogue_reason_text")
+    elif contains_any(dialogue_reason, DIALOGUE_VISUAL_LEAK_TERMS):
+        failures.append("dialogue_visual_leak")
+    if visual_reason and has_visual_final_leak(visual_reason, labels):
+        failures.append("visual_final_label_leak")
+    if fusion_status != "ok":
+        failures.append("fusion_parse_failed")
+        if parse_error:
+            failures.append(f"fusion_parse_failed_{parse_error}")
+    if fusion_reason:
+        think_words = word_count(fusion_reason)
+        if think_words < THINK_WORD_RANGE[0]:
+            failures.append("fusion_think_too_short")
+        elif think_words > THINK_WORD_RANGE[1]:
+            failures.append("fusion_think_too_long")
+        if has_instruction_leak(fusion_reason):
+            failures.append("fusion_instruction_leak")
 
-    return reasons
+    return {
+        "failures": failures,
+        "gold": gold,
+        "visual_reason": visual_reason,
+        "dialogue_reason": dialogue_reason,
+        "fusion_response": fusion_response,
+        "fusion_reason": fusion_reason,
+        "final_answer": final_answer,
+        "fusion_flags": count_fusion_flags(fusion_reason or ""),
+    }
 
 
-def make_sft_row(row, labels, visual_reason, dialogue_reason, gold):
+def make_sft_row(row, labels, quality):
     query = build_student_user_prompt(row, labels)
-    response = build_sft_assistant_response(visual_reason, dialogue_reason, gold, row.get("sample_id"))
-    video_path = row.get("video_path")
+    response = quality["fusion_response"].strip()
     return {
         "sample_id": row.get("sample_id"),
         "dataset": row.get("dataset"),
@@ -258,15 +233,16 @@ def make_sft_row(row, labels, visual_reason, dialogue_reason, gold):
         ],
         "query": query,
         "response": response,
-        "videos": [video_path],
-        "gold": gold,
+        "videos": [row.get("video_path")],
+        "gold": quality["gold"],
         "candidate_labels": labels,
-        "visual_reason": visual_reason,
-        "dialogue_reason": dialogue_reason,
+        "visual_reason": quality["visual_reason"],
+        "dialogue_reason": quality["dialogue_reason"],
+        "fusion_response": response,
     }
 
 
-def make_rl_row(row, labels, visual_reason, dialogue_reason, gold):
+def make_rl_row(row, labels, quality):
     return {
         "sample_id": row.get("sample_id"),
         "dataset": row.get("dataset"),
@@ -274,32 +250,11 @@ def make_rl_row(row, labels, visual_reason, dialogue_reason, gold):
         "task_type": "multimodal_reasoning_grpo",
         "prompt": build_student_user_prompt(row, labels),
         "videos": [row.get("video_path")],
-        "gold": gold,
+        "gold": quality["gold"],
         "candidate_labels": labels,
-        "reference_visual_reason": visual_reason,
-        "reference_dialogue_reason": dialogue_reason,
-    }
-
-
-def make_weak_preference_row(row, labels, visual_reason, dialogue_reason, gold):
-    wrong_label = choose_wrong_label(row.get("sample_id"), labels, gold)
-    if not wrong_label:
-        return None
-    return {
-        "sample_id": row.get("sample_id"),
-        "dataset": row.get("dataset"),
-        "split": row.get("split"),
-        "task_type": "multimodal_reasoning_preference",
-        "preference_type": "weak_answer_only_wrong_label",
-        "prompt": build_student_user_prompt(row, labels),
-        "videos": [row.get("video_path")],
-        "chosen": build_sft_assistant_response(visual_reason, dialogue_reason, gold, row.get("sample_id")),
-        "rejected": f"<answer>\n{wrong_label}\n</answer>",
-        "gold": gold,
-        "rejected_label": wrong_label,
-        "candidate_labels": labels,
-        "visual_reason": visual_reason,
-        "dialogue_reason": dialogue_reason,
+        "reference_visual_reason": quality["visual_reason"],
+        "reference_dialogue_reason": quality["dialogue_reason"],
+        "reference_fusion_response": quality["fusion_response"].strip(),
     }
 
 
@@ -312,7 +267,7 @@ def parse_args():
     parser.add_argument("--label-file")
     parser.add_argument("--visual-pattern", action="append")
     parser.add_argument("--dialogue-pattern", action="append")
-    parser.add_argument("--build-weak-preferences", action="store_true")
+    parser.add_argument("--fusion-pattern", action="append")
     parser.add_argument("--skip-video-exists-check", action="store_true")
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -322,6 +277,7 @@ def parse_args():
     args.label_file = args.label_file or str(default_label_file(cfg, args.dataset))
     args.visual_pattern = args.visual_pattern or [str(p) for p in default_patterns(cfg, args.dataset, args.split, "visual")]
     args.dialogue_pattern = args.dialogue_pattern or [str(p) for p in default_patterns(cfg, args.dataset, args.split, "dialogue")]
+    args.fusion_pattern = args.fusion_pattern or [str(p) for p in default_patterns(cfg, args.dataset, args.split, "fusion")]
     args.output_paths = output_paths(cfg, args.dataset, args.split)
     return args
 
@@ -330,55 +286,52 @@ def main():
     args = parse_args()
     labels = load_labels(args.label_file)
     source_rows = list(read_jsonl(args.manifest))
-    visual_by_id = load_teacher_outputs(args.visual_pattern, "visual")
-    dialogue_by_id = load_teacher_outputs(args.dialogue_pattern, "dialogue")
+    visual_by_id = load_rows_by_id(args.visual_pattern, "visual", "visual_reason")
+    dialogue_by_id = load_rows_by_id(args.dialogue_pattern, "dialogue", "dialogue_reason")
+    fusion_by_id = load_rows_by_id(args.fusion_pattern, "fusion", "teacher_output")
 
     sft_rows = []
     rl_rows = []
     pref_rows = []
-    stats = Counter(total_samples=len(source_rows))
+    stats = Counter(total_manifest_samples=len(source_rows))
     failure_examples = []
 
     for row in source_rows:
         sid = row.get("sample_id")
         visual_row = visual_by_id.get(sid)
         dialogue_row = dialogue_by_id.get(sid)
+        fusion_row = fusion_by_id.get(sid)
         if visual_row:
-            stats["visual_teacher_rows"] += 1
-        else:
-            stats["missing_visual_teacher"] += 1
+            stats["visual_loaded_ok"] += 1
         if dialogue_row:
-            stats["dialogue_teacher_rows"] += 1
-        else:
-            stats["missing_dialogue_teacher"] += 1
+            stats["dialogue_loaded_ok"] += 1
+        if fusion_row:
+            stats["fusion_loaded_ok"] += 1
+            stats["fusion_generated_ok"] += 1
 
-        visual_reason = (visual_row or {}).get("visual_reason", "")
-        dialogue_reason = (dialogue_row or {}).get("dialogue_reason", "")
-        if visual_reason:
-            stats["visual_reason_generated"] += 1
-        if dialogue_reason:
-            stats["dialogue_reason_generated"] += 1
-        failures = check_quality(row, labels, visual_reason, dialogue_reason, args)
-        if failures:
-            for failure in failures:
+        quality = validate_sample(row, labels, visual_row, dialogue_row, fusion_row, args)
+        if quality["failures"]:
+            for failure in quality["failures"]:
                 stats[failure] += 1
+                if failure in ("fusion_think_too_short", "fusion_think_too_long"):
+                    stats["filtered_by_reason_length"] += 1
+                if failure in ("fusion_instruction_leak",):
+                    stats["filtered_by_instruction_leak"] += 1
             if len(failure_examples) < 30:
-                failure_examples.append({"sample_id": sid, "failures": failures})
+                failure_examples.append({"sample_id": sid, "failures": quality["failures"]})
             continue
 
-        gold = normalize_label(row.get(args.gold_field, ""))
         stats["passed_quality_filter"] += 1
-        sft_rows.append(make_sft_row(row, labels, visual_reason, dialogue_reason, gold))
-        rl_rows.append(make_rl_row(row, labels, visual_reason, dialogue_reason, gold))
-        if args.build_weak_preferences:
-            pref = make_weak_preference_row(row, labels, visual_reason, dialogue_reason, gold)
-            if pref:
-                pref_rows.append(pref)
+        for flag_name, enabled in quality["fusion_flags"].items():
+            if enabled:
+                stats[flag_name] += 1
+        sft_rows.append(make_sft_row(row, labels, quality))
+        rl_rows.append(make_rl_row(row, labels, quality))
 
     counts = {
         "final_sft_samples": write_jsonl(args.output_paths["sft"], sft_rows),
         "final_rl_samples": write_jsonl(args.output_paths["rl"], rl_rows),
-        "preference_samples": write_jsonl(args.output_paths["preference"], pref_rows),
+        "final_preference_samples": write_jsonl(args.output_paths["preference"], pref_rows),
     }
     stats.update(counts)
     summary = {
@@ -389,10 +342,11 @@ def main():
         "gold_field": args.gold_field,
         "visual_patterns": args.visual_pattern,
         "dialogue_patterns": args.dialogue_pattern,
+        "fusion_patterns": args.fusion_pattern,
         "quality_rules": {
-            "visual_words": list(VISUAL_WORD_RANGE),
-            "dialogue_words": list(DIALOGUE_WORD_RANGE),
-            "dialogue_visual_leak_terms": list(VISUAL_LEAK_TERMS),
+            "think_words": list(THINK_WORD_RANGE),
+            "dialogue_visual_leak_terms": list(DIALOGUE_VISUAL_LEAK_TERMS),
+            "visual_final_leak_patterns": list(VISUAL_FINAL_LEAK_PATTERNS),
         },
         "outputs": {name: str(path) for name, path in args.output_paths.items()},
         "stats": dict(sorted(stats.items())),

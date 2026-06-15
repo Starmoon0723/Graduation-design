@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import glob
 import json
 import random
 import re
@@ -31,6 +32,43 @@ ALIASES = {
     "excitement": ["excitement", "excited"],
     "excited": ["excited", "excitement"],
     "other": ["other"],
+}
+
+INSTRUCTION_LEAK_PATTERNS = (
+    r"\bgold label is provided\b",
+    r"\btarget label is provided\b",
+    r"\baccording to the prompt\b",
+    r"\bthe task asks me\b",
+    r"\bthe prompt asks\b",
+    r"\bas instructed\b",
+)
+
+FUSION_KEYWORDS = {
+    "speaker_not_visible": (
+        "not clearly visible",
+        "cannot be identified",
+        "off-camera",
+        "occluded",
+        "too small",
+        "visually ambiguous",
+    ),
+    "visual_weak_or_limited": (
+        "weak",
+        "limited support",
+        "little support",
+        "subtle",
+        "neutral-looking",
+        "provides limited",
+        "little or no speaker-specific evidence",
+    ),
+    "visual_conflict_or_not_aligned": (
+        "inconsistent",
+        "does not clearly support",
+        "does not support",
+        "not aligned",
+        "conflict",
+        "more decisive",
+    ),
 }
 
 
@@ -145,6 +183,50 @@ def extract_reason(output_text, field_name, strict_schema=False):
     return reason, "ok" if reason else "empty"
 
 
+def parse_dialogue_reason(output_text):
+    reason, status = extract_reason(output_text, "DIALOGUE_REASON", strict_schema=True)
+    if status != "ok" or not reason:
+        return None, "parse_failed"
+    return reason, "ok"
+
+
+def has_instruction_leak(text):
+    lowered = normalize_text(text)
+    return any(re.search(pattern, lowered) for pattern in INSTRUCTION_LEAK_PATTERNS)
+
+
+def parse_fusion_response(output_text, gold, labels):
+    text = (output_text or "").strip()
+    if not text:
+        return None, None, "parse_failed", "empty_output"
+    think_match = re.search(r"<think>\s*(.*?)\s*</think>", text, flags=re.IGNORECASE | re.DOTALL)
+    answer_match = re.search(r"<answer>\s*(.*?)\s*</answer>", text, flags=re.IGNORECASE | re.DOTALL)
+    if not think_match or not answer_match:
+        return None, None, "parse_failed", "missing_think_or_answer"
+    think = think_match.group(1).strip()
+    raw_answer = answer_match.group(1).strip()
+    answer = normalize_label(raw_answer)
+    if not think:
+        return None, answer, "parse_failed", "empty_think"
+    if has_instruction_leak(think):
+        return think, answer, "parse_failed", "instruction_leak"
+    if raw_answer != raw_answer.lower():
+        return think, answer, "parse_failed", "answer_not_lowercase"
+    if answer not in labels:
+        return think, answer, "parse_failed", "answer_not_in_labels"
+    if answer != gold:
+        return think, answer, "parse_failed", "answer_not_gold"
+    return think, answer, "ok", None
+
+
+def count_fusion_flags(text):
+    lowered = normalize_text(text)
+    flags = {}
+    for name, keywords in FUSION_KEYWORDS.items():
+        flags[name] = any(keyword in lowered for keyword in keywords)
+    return flags
+
+
 def visual_prompt(row):
     return (
         "You are generating the final visual evidence text for a multimodal emotion recognition dataset.\n\n"
@@ -187,12 +269,15 @@ def dialogue_prompt(row, labels, gold):
     return (
         "You are constructing dialogue-only reasoning data for emotion recognition in conversation.\n\n"
         "You will be given a dialogue context, the current speaker, the current utterance, "
-        "and the target emotion label. Your task is to explain why the target emotion is "
-        "reasonable based only on the dialogue text.\n\n"
+        "and the target emotion label. Your task is to write a faithful text-based "
+        "explanation for why the target emotion can be assigned to the current speaker "
+        "in this utterance.\n\n"
+        "Use only the dialogue text and conversational context. Do not use or mention "
+        "any visual, audio, facial, body, gaze, posture, or scene evidence.\n\n"
         "### Dialogue Context\n"
         f"{conversation_text(row)}\n\n"
         "### Current Speaker\n"
-        f"{speaker_name(row)}\n\n"
+        f"{speaker_display(row)}\n\n"
         "### Current Utterance\n"
         f"\"{clean_text(row.get('text', ''))}\"\n\n"
         "### Target Emotion Label\n"
@@ -200,18 +285,73 @@ def dialogue_prompt(row, labels, gold):
         "### Candidate Emotion Labels\n"
         f"{label_text}\n\n"
         "### Task\n"
-        f"Write a dialogue-only reasoning explanation for why the current speaker's emotion is \"{gold}\".\n\n"
-        "Analysis requirements:\n"
-        "- Use only the dialogue text and conversational context.\n"
-        "- Do not mention visual, audio, facial expression, body gesture, gaze, or scene evidence.\n"
-        "- Explain lexical evidence, pragmatic meaning, speaker intention, discourse structure, and emotional shift when relevant.\n"
-        "- Explicitly refer to or quote key words from the current utterance or previous turns.\n"
-        "- If the emotion is subtle, explain why it is implied rather than directly stated.\n"
+        f"Write a dialogue-only reasoning paragraph explaining why the current speaker's emotion can be interpreted as \"{gold}\" from the text and context.\n\n"
+        "Requirements:\n"
+        "- Use only textual and conversational evidence.\n"
+        "- Do not mention video, audio, facial expression, body gesture, gaze, posture, scene, or visual cues.\n"
+        "- Refer to or quote key words from the current utterance or previous turns when useful.\n"
+        "- Explain the role of the current utterance, previous turns, speaker intention, pragmatic meaning, discourse progression, and emotional shift when relevant.\n"
+        "- Pay attention to short utterances, hesitation, repetition, punctuation, rhetorical questions, contrast, sarcasm, jokes, and implicit emotional shifts.\n"
+        "- If the textual evidence is indirect, subtle, or weak, state this honestly instead of overstating the evidence.\n"
         "- Do not say that a gold label is provided.\n"
+        "- Do not compare all candidate labels mechanically.\n"
         "- Write one coherent paragraph, about 80 to 200 words.\n\n"
         "Output exactly this schema:\n\n"
         "DIALOGUE_REASON: ..."
     )
+
+
+def fusion_prompt(row, labels, gold, visual_reason, dialogue_reason):
+    label_text = ", ".join(labels)
+    return (
+        "You are constructing final multimodal reasoning data for emotion recognition in conversation.\n\n"
+        "You will be given:\n"
+        "1. the dialogue context and current utterance;\n"
+        "2. a visual evidence paragraph generated from the video;\n"
+        "3. a dialogue-only reasoning paragraph generated from the text;\n"
+        "4. the target emotion label.\n\n"
+        "Your task is to write the final multimodal reasoning response for SFT/RL data construction.\n\n"
+        "### Dialogue Context\n"
+        f"{conversation_text(row)}\n\n"
+        "### Current Speaker\n"
+        f"{speaker_display(row)}\n\n"
+        "### Current Utterance\n"
+        f"\"{clean_text(row.get('text', ''))}\"\n\n"
+        "### Candidate Emotion Labels\n"
+        f"{label_text}\n\n"
+        "### Target Emotion Label\n"
+        f"{gold}\n\n"
+        "### Visual Evidence\n"
+        f"{visual_reason}\n\n"
+        "### Dialogue-only Reasoning\n"
+        f"{dialogue_reason}\n\n"
+        "### Task\n"
+        f"Write a faithful multimodal reasoning chain that explains why the final emotion label is \"{gold}\", using the dialogue-only reasoning and the visual evidence appropriately.\n\n"
+        "Important reasoning rules:\n"
+        f"- The final answer must be exactly \"{gold}\".\n"
+        "- Do not say that a gold label or target label is provided.\n"
+        "- Do not invent any new visual details beyond the given Visual Evidence.\n"
+        "- Do not invent dialogue content beyond the given Dialogue Context and Current Utterance.\n"
+        "- Do not force the visual evidence to support the final label if it does not.\n"
+        "- If the target speaker is not visible, off-camera, unclear, or visually ambiguous, explicitly state that the video provides little or no speaker-specific evidence and rely mainly on the dialogue context.\n"
+        "- If the visual evidence is weak, neutral-looking, or not clearly emotion-related, state that it provides limited support.\n"
+        "- If the visual evidence appears inconsistent with the final label, state the inconsistency honestly and explain why the dialogue context is more decisive.\n"
+        "- If the visual evidence supports the dialogue reasoning, explain how it reinforces the final interpretation.\n"
+        "- The reasoning should mention both modalities, but it should weight them differently depending on their reliability.\n"
+        "- Avoid mechanical phrasing. Write a natural, coherent reasoning paragraph.\n"
+        "- Keep the reasoning between 120 and 260 words.\n\n"
+        "Output exactly in this format:\n\n"
+        "<think>\n"
+        "...\n"
+        "</think>\n"
+        "<answer>\n"
+        f"{gold}\n"
+        "</answer>"
+    )
+
+
+def build_fusion_prompt(row, labels, gold, visual_reason, dialogue_reason):
+    return fusion_prompt(row, labels, gold, visual_reason, dialogue_reason)
 
 
 def predict_prompt(row, labels, prompt_field):
@@ -245,7 +385,16 @@ def file_url(path):
 
 
 def build_messages(row, labels, args):
-    prompt = build_prompt(row, labels, args.prompt_field, args.step, args.current_gold)
+    if args.step == "fusion":
+        prompt = build_fusion_prompt(
+            row,
+            labels,
+            args.current_gold,
+            args.current_visual_reason,
+            args.current_dialogue_reason,
+        )
+    else:
+        prompt = build_prompt(row, labels, args.prompt_field, args.step, args.current_gold)
     content = []
     if args.step in ("visual", "predict"):
         content.append({"type": "video_url", "video_url": {"url": file_url(row["video_path"])}})
@@ -345,6 +494,8 @@ def existing_sample_ids(path, step):
             ids.add(sample_id)
         elif step == "dialogue" and row.get("status") == "ok" and row.get("dialogue_reason"):
             ids.add(sample_id)
+        elif step == "fusion" and row.get("status") == "ok" and row.get("fusion_reason") and row.get("final_answer"):
+            ids.add(sample_id)
         elif step == "predict" and row.get("status") == "ok" and row.get("prediction"):
             ids.add(sample_id)
     return ids
@@ -366,11 +517,34 @@ def default_label_file(cfg, dataset):
     return resolve_project_path(cfg, dataset_cfg(cfg, dataset)["label_file"])
 
 
+def default_reason_patterns(cfg, dataset, split, reason_step):
+    key = "step1_visual_reason" if reason_step == "visual" else "step2_dialogue_reason"
+    root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"][key]
+    return [str(root / dataset / f"{split}_shard*.jsonl")]
+
+
+def load_reason_map(patterns, reason_step):
+    reason_key = "visual_reason" if reason_step == "visual" else "dialogue_reason"
+    by_id = {}
+    for pattern in patterns:
+        for file in sorted(glob.glob(str(pattern))):
+            for row in read_jsonl(file):
+                if row.get("status") != "ok":
+                    continue
+                sample_id = row.get("sample_id")
+                reason = row.get(reason_key)
+                if sample_id and reason:
+                    by_id[sample_id] = row
+    return by_id
+
+
 def default_output(cfg, step, dataset, split, shard):
     if step == "visual":
         key = "step1_visual_reason"
     elif step == "dialogue":
         key = "step2_dialogue_reason"
+    elif step == "fusion":
+        key = "step3_fusion_reason"
     else:
         key = "diagnostic_predict"
     root = resolve_project_path(cfg, cfg["output"]["root"]) / cfg["output"].get(key, key)
@@ -380,13 +554,15 @@ def default_output(cfg, step, dataset, split, shard):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None)
-    parser.add_argument("--step", choices=["visual", "dialogue", "predict"], required=True)
+    parser.add_argument("--step", choices=["visual", "dialogue", "fusion", "predict"], required=True)
     parser.add_argument("--dataset", choices=["meld", "iemocap"], required=True)
     parser.add_argument("--split", default="train")
     parser.add_argument("--manifest")
     parser.add_argument("--label-file")
     parser.add_argument("--output")
     parser.add_argument("--servers", required=True, help="Comma-separated OpenAI base URLs, e.g. http://127.0.0.1:18000/v1,http://127.0.0.1:18001/v1")
+    parser.add_argument("--visual-reason-file", "--visual_reason_file", action="append")
+    parser.add_argument("--dialogue-reason-file", "--dialogue_reason_file", action="append")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0)
@@ -404,6 +580,8 @@ def parse_args():
     args.manifest = args.manifest or str(default_manifest(cfg, args.dataset, args.split))
     args.label_file = args.label_file or str(default_label_file(cfg, args.dataset))
     args.output = args.output or str(default_output(cfg, args.step, args.dataset, args.split, args.shard_index))
+    args.visual_reason_file = args.visual_reason_file or default_reason_patterns(cfg, args.dataset, args.split, "visual")
+    args.dialogue_reason_file = args.dialogue_reason_file or default_reason_patterns(cfg, args.dataset, args.split, "dialogue")
     args.fps = float(gen.get("fps", 2))
     args.do_sample_frames = bool(gen.get("do_sample_frames", True))
     step_max_tokens_key = f"max_tokens_{args.step}"
@@ -453,6 +631,8 @@ def main():
     rows = [row for idx, row in enumerate(rows) if idx % args.num_shards == args.shard_index]
     if args.limit > 0:
         rows = rows[: args.limit]
+    visual_by_id = load_reason_map(args.visual_reason_file, "visual") if args.step == "fusion" else {}
+    dialogue_by_id = load_reason_map(args.dialogue_reason_file, "dialogue") if args.step == "fusion" else {}
 
     servers = [server.strip() for server in args.servers.split(",") if server.strip()]
     if not servers:
@@ -473,6 +653,8 @@ def main():
                 "output": args.output,
                 "servers": servers,
                 "server_for_shard": server_for_shard,
+                "visual_reason_files": args.visual_reason_file if args.step == "fusion" else None,
+                "dialogue_reason_files": args.dialogue_reason_file if args.step == "fusion" else None,
             },
             ensure_ascii=False,
         ),
@@ -486,6 +668,8 @@ def main():
         started = time.time()
         gold = normalize_label(row.get(args.gold_field, ""))
         args.current_gold = gold
+        args.current_visual_reason = ""
+        args.current_dialogue_reason = ""
         if args.step in ("visual", "predict") and (not row.get("video_path") or not Path(row["video_path"]).exists()):
             counters["missing_video"] += 1
             append_jsonl(
@@ -501,6 +685,27 @@ def main():
                 },
             )
             continue
+        if args.step == "fusion":
+            visual_row = visual_by_id.get(sample_id)
+            dialogue_row = dialogue_by_id.get(sample_id)
+            if not visual_row or not dialogue_row:
+                counters["skipped_missing_reason"] += 1
+                append_jsonl(
+                    args.output,
+                    {
+                        "sample_id": sample_id,
+                        "dataset": args.dataset,
+                        "split": args.split,
+                        "step": args.step,
+                        "status": "skipped_missing_reason",
+                        "gold": gold,
+                        "has_visual_reason": bool(visual_row),
+                        "has_dialogue_reason": bool(dialogue_row),
+                    },
+                )
+                continue
+            args.current_visual_reason = visual_row.get("visual_reason", "")
+            args.current_dialogue_reason = dialogue_row.get("dialogue_reason", "")
         try:
             raw_output, raw_response, response_meta = generate_one(row, labels, args, server_for_shard)
             error = None
@@ -512,12 +717,33 @@ def main():
                 record["visual_reason"] = reason
                 counters["visual_reason_generated" if reason else "visual_reason_empty"] += 1
             elif args.step == "dialogue":
-                reason, status = extract_reason(raw_output, "DIALOGUE_REASON", strict_schema=True)
+                reason, status = parse_dialogue_reason(raw_output)
                 record = base_record(
                     row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
                 )
                 record["dialogue_reason"] = reason
-                counters["dialogue_reason_generated" if reason else "dialogue_reason_empty"] += 1
+                counters["dialogue_reason_generated" if reason else "dialogue_reason_parse_failed"] += 1
+            elif args.step == "fusion":
+                fusion_reason, final_answer, status, parse_error = parse_fusion_response(raw_output, gold, labels)
+                record = base_record(
+                    row, args, gold, status, raw_output, raw_response, response_meta, server_for_shard, started, error
+                )
+                record["fusion_reason"] = fusion_reason
+                record["final_answer"] = final_answer
+                record["parse_error"] = parse_error
+                record["visual_reason"] = args.current_visual_reason
+                record["dialogue_reason"] = args.current_dialogue_reason
+                flags = count_fusion_flags(fusion_reason or "")
+                record["fusion_flags"] = flags
+                if status == "ok":
+                    counters["fusion_generated_ok"] += 1
+                    for flag_name, enabled in flags.items():
+                        if enabled:
+                            counters[flag_name] += 1
+                else:
+                    counters["fusion_parse_failed"] += 1
+                    if parse_error:
+                        counters[f"fusion_parse_failed_{parse_error}"] += 1
             else:
                 prediction = extract_label(raw_output, labels)
                 status = "ok" if prediction else "ok_unparsed"

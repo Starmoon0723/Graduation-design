@@ -34,6 +34,7 @@ generation:
   max_tokens: 10000
   max_tokens_visual: 10000
   max_tokens_dialogue: 10000
+  max_tokens_fusion: 10000
   max_tokens_predict: 10000
   temperature: 1.0
   top_p: 0.95
@@ -64,6 +65,7 @@ output:
   logs: datasets_video_text/cot_dataset_builder/logs/qwen36_27b
   step1_visual_reason: step1_visual_reason
   step2_dialogue_reason: step2_dialogue_reason
+  step3_fusion_reason: step3_fusion_reason
   diagnostic_predict: diagnostic_predict
   final_sft: final_sft
   final_rl: final_rl
